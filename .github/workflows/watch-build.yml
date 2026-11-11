@@ -1,0 +1,127 @@
+name: Watch build
+
+# Builds the watch firmware on every push to the "watch" branch and publishes
+# the flashable file as a GitHub Release, so it can be downloaded on a phone
+# and installed with Gadgetbridge.
+#
+# Only the app firmware is published. The bootloader, recovery and
+# recovery-loader images are deliberately never built or published here:
+# flashing those is what can brick a sealed watch.
+
+on:
+  push:
+    branches: [ watch ]
+    paths-ignore:
+      - 'doc/**'
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: watch-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    container:
+      image: infinitime/infinitime-build
+    env:
+      # Sources are checked out into the current directory.
+      SOURCES_DIR: .
+      # Only the app firmware is built, so skip the script that collects every build output.
+      DISABLE_POSTBUILD: "true"
+    steps:
+      - name: Checkout source files
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install resource build dependencies
+        run: |
+          apt-get update
+          apt-get -y install --no-install-recommends python3-pil
+
+      # The build image now ships a newer compiler than the one the 1.16.1 release
+      # was built with. The repo's own build script fetches the release's compiler
+      # (GCC 10.3-2021.10) when it is missing; cache it so it is downloaded once.
+      - name: Cache release compiler
+        uses: actions/cache@v4
+        with:
+          path: /opt/gcc-arm-none-eabi-10.3-2021.10
+          key: gcc-arm-none-eabi-10.3-2021.10-${{ runner.arch }}
+
+      - name: Build
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory /__w/InfiniTime/InfiniTime
+          bash docker/build.sh pinetime-mcuboot-app
+
+      - name: Collect the flashable file
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_ref="$(git rev-parse --short HEAD)"
+          subject="$(git log -1 --format=%s)"
+
+          dfu=(build/src/pinetime-mcuboot-app-dfu-*.zip)
+          img=(build/src/pinetime-mcuboot-app-image-*.bin)
+          [ "${#dfu[@]}" -eq 1 ] && [ -f "${dfu[0]}" ]
+          [ "${#img[@]}" -eq 1 ] && [ -f "${img[0]}" ]
+          size="$(stat -c %s "${img[0]}")"
+
+          mkdir -p out
+          cp "${dfu[0]}" "out/watch-build-${GITHUB_RUN_NUMBER}.zip"
+
+          echo "Contents of the flashable file:"
+          unzip -l "out/watch-build-${GITHUB_RUN_NUMBER}.zip"
+          echo "Firmware image: ${size} of 475136 bytes"
+
+          {
+            echo "Watch firmware build ${GITHUB_RUN_NUMBER}."
+            echo
+            echo "- Code: \`${short_ref}\` (${subject})"
+            echo "- Once installed, the watch's About page shows Short Ref \`${short_ref}\`."
+            echo "- Size: ${size} of 475136 bytes."
+          } > out/notes.md
+          cat out/notes.md
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-file
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: Publish flashable file
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # needed to create the release
+    steps:
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: release-file
+          path: out
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_NUMBER}"
+          if [ "${GITHUB_RUN_ATTEMPT}" != "1" ]; then
+            tag="${tag}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          gh release create "$tag" out/watch-build-*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Watch build ${GITHUB_RUN_NUMBER}" \
+            --notes-file out/notes.md \
+            --latest
