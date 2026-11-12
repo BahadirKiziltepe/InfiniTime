@@ -93,6 +93,12 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
 
   /** The Claude notifications on the phone right now, by Android's name for each. */
   private final java.util.Set<String> claudeWaiting = new java.util.HashSet<>();
+  /** Two announcements of one reply within this time get one buzz. */
+  private static final long CLAUDE_BUZZ_GAP_MS = 3_000;
+  private static final long CLAUDE_TEST_MS = 20_000;
+  private long claudeBuzzAt = -CLAUDE_BUZZ_GAP_MS;
+  private int claudeBuzzes;
+  private boolean claudeTesting;
 
   private final List<Runnable> screens = new ArrayList<>();
   private boolean screenUpdatePosted;
@@ -193,23 +199,29 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       for (StatusBarNotification sbn : showing) {
         if (sbn != null) {
           calls.onPosted(sbn);
-          noteClaude(sbn, true);
+          // What is already there gets the dot, but no buzz: it is not news.
+          noteClaude(sbn, true, false);
         }
       }
     }
-    watch.setWaitingMark(!claudeWaiting.isEmpty());
+    watch.setWaitingMark(!claudeWaiting.isEmpty() || claudeTesting);
     changed();
   }
 
   /** Keeps count of the Claude app's notifications, and tells the watch when the first comes or the last goes. */
-  private void noteClaude(StatusBarNotification sbn, boolean posted) {
+  private void noteClaude(StatusBarNotification sbn, boolean posted, boolean announce) {
     if (!CLAUDE.equals(sbn.getPackageName())) {
       return;
     }
     boolean before = !claudeWaiting.isEmpty();
+    boolean fresh = false;
     // One that cannot be swiped away is the app saying that it is busy, not that it has something to say.
     if (posted && !sbn.isOngoing()) {
-      claudeWaiting.add(sbn.getKey());
+      boolean known = !claudeWaiting.add(sbn.getKey());
+      // A notification that is new, or one that Claude put up again to be noticed again
+      android.app.Notification n = sbn.getNotification();
+      boolean quietUpdate = known && n != null && (n.flags & android.app.Notification.FLAG_ONLY_ALERT_ONCE) != 0;
+      fresh = !quietUpdate && (n == null || (n.flags & android.app.Notification.FLAG_GROUP_SUMMARY) == 0);
     } else {
       claudeWaiting.remove(sbn.getKey());
     }
@@ -217,8 +229,59 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     if (now != before) {
       log.add("notify", now ? "Claude has a notification waiting: the watch shows its dot"
           : "no Claude notification is waiting any more: the watch's dot goes");
-      watch.setWaitingMark(now);
     }
+    watch.setWaitingMark(now || claudeTesting);
+    if (fresh && announce) {
+      buzzForClaude();
+    }
+    changed();
+  }
+
+  /** Makes the watch buzz, as it does for a notification, without showing one. */
+  private void buzzForClaude() {
+    long at = android.os.SystemClock.elapsedRealtime();
+    if (at - claudeBuzzAt < CLAUDE_BUZZ_GAP_MS) {
+      return;
+    }
+    claudeBuzzAt = at;
+    if (watch.sendPhone(PhoneFrames.markAlert())) {
+      claudeBuzzes++;
+      log.add("notify", "Claude: the watch was told to buzz");
+    }
+  }
+
+  /** For the button on the screen: shows the dot and buzzes as if Claude had just replied, for a short while. */
+  void testClaude() {
+    claudeTesting = true;
+    watch.setWaitingMark(true);
+    claudeBuzzAt = -CLAUDE_BUZZ_GAP_MS;
+    buzzForClaude();
+    log.add("notify", "Claude test: dot on, buzz sent");
+    main.postDelayed(() -> {
+      claudeTesting = false;
+      watch.setWaitingMark(!claudeWaiting.isEmpty());
+      changed();
+    }, CLAUDE_TEST_MS);
+    changed();
+  }
+
+  /** One line for the screen about the dot. */
+  String describeClaude() {
+    if (!watch.isReady()) {
+      return "Claude: waiting for the watch.";
+    }
+    if (claudeTesting) {
+      return "✓ Claude: test under way. The watch should have buzzed and shows the dot for 20 seconds.";
+    }
+    int count = claudeWaiting.size();
+    return count == 0 ? "✓ Claude: no notification from Claude on the phone right now."
+        : "✓ Claude: " + count + (count == 1 ? " notification is" : " notifications are")
+            + " waiting on the phone. The watch shows the dot.";
+  }
+
+  /** How often the watch was told to buzz for Claude, for the report. */
+  int claudeBuzzes() {
+    return claudeBuzzes;
   }
 
   /** How many Claude notifications are waiting, for the report. */
@@ -228,7 +291,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
 
   void onNotificationPosted(StatusBarNotification sbn, NotificationListenerService.RankingMap ranking) {
     calls.onPosted(sbn);
-    noteClaude(sbn, true);
+    noteClaude(sbn, true, true);
     if (NotificationRelay.relays(sbn.getPackageName())) {
       notifications.onPosted(sbn, ranking);
       changed();
@@ -237,7 +300,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
 
   void onNotificationRemoved(StatusBarNotification sbn) {
     calls.onRemoved(sbn);
-    noteClaude(sbn, false);
+    noteClaude(sbn, false, false);
     if (NotificationRelay.relays(sbn.getPackageName())) {
       notifications.onRemoved(sbn);
       changed();
@@ -248,7 +311,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     log.add("app", "notification access was switched off");
     spotify.stop();
     claudeWaiting.clear();
-    watch.setWaitingMark(false);
+    watch.setWaitingMark(claudeTesting);
   }
 
   boolean hasNotificationAccess() {

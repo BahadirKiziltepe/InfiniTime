@@ -28,6 +28,7 @@ namespace Pinetime {
         ShakeToSleep,
         // The phone is ringing: bring up the call screen
         IncomingCall,
+        WaitingMark,
       };
     }
   }

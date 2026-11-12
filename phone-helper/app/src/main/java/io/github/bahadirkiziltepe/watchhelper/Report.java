@@ -35,7 +35,8 @@ final class Report {
 
     sb.append("\n== Notifications ==\n");
     sb.append(core.notifications.dump());
-    sb.append("Claude notifications waiting (shown as a dot on the watch): ").append(core.claudeWaiting()).append('\n');
+    sb.append("Claude notifications waiting (shown as a dot on the watch): ").append(core.claudeWaiting())
+        .append(", buzzes sent for them: ").append(core.claudeBuzzes()).append('\n');
 
     sb.append("\n== Calls ==\n");
     sb.append(core.calls.dump());

@@ -37,6 +37,7 @@ final class PhoneFrames {
   private static final int CLEAR = 0x03;
   private static final int TEXT = 0x04;
   private static final int END = 0x05;
+  private static final int MARK_ALERT = 0x06;
   private static final int CALL = 0x10;
   private static final int CALL_MORE = 0x11;
 
@@ -168,6 +169,16 @@ final class PhoneFrames {
   static List<byte[]> remove(int id) {
     List<byte[]> out = new ArrayList<>();
     out.add(new byte[] {(byte) REMOVE, (byte) id, (byte) (id >> 8)});
+    return out;
+  }
+
+  /**
+   * Makes the watch buzz for something that it only marks with the dot on its main screen (watch
+   * build 13 and newer; older builds ignore it). The dot itself is switched on and off elsewhere.
+   */
+  static List<byte[]> markAlert() {
+    List<byte[]> out = new ArrayList<>();
+    out.add(new byte[] {(byte) MARK_ALERT});
     return out;
   }
 

@@ -267,6 +267,14 @@ void DisplayApp::Refresh() {
       }
       queueTimeout = lv_task_handler();
 
+      // The buzz for the dot on the main screen lasts 0.6 s, like the one for a notification. The
+      // motor only runs a quarter of a second per request, so it is started again before it has run out.
+      if (markBuzzLeft > 0 && (xTaskGetTickCount() - markBuzzTick) >= pdMS_TO_TICKS(200)) {
+        markBuzzTick = xTaskGetTickCount();
+        markBuzzLeft--;
+        motorController.RunForDuration(markBuzzLeft > 0 ? 250 : 200);
+      }
+
       // A call keeps the screen on, whichever screen is showing, so that it can be ended from the
       // wrist at any moment. The watch does not go to sleep by itself then, and the light is not
       // turned down either. Only the side button switches the screen off (see ButtonPushed); after
@@ -388,6 +396,13 @@ void DisplayApp::Refresh() {
           ringOnCallScreen = true;
           LoadNewScreen(Apps::Call, DisplayApp::FullRefreshDirections::Down);
         }
+        break;
+      case Messages::WaitingMark:
+        // Something new is waiting on the phone that only shows as the dot on the main screen
+        // (a reply from Claude). The watch buzzes for it; there is nothing else to show.
+        markBuzzLeft = 3;
+        markBuzzTick = xTaskGetTickCount() - pdMS_TO_TICKS(200);
+        lv_disp_trig_activity(nullptr);
         break;
       case Messages::ShakeToSleep:
         // Shaking the watch again turns the screen off, but only on the main screen. A notification

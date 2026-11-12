@@ -9,6 +9,7 @@ namespace Pinetime {
       OnNewTime,
       OnNewNotification,
       OnNewCall,
+      OnWaitingMark,
       BleConnected,
       BleFirmwareUpdateStarted,
       BleFirmwareUpdateFinished,

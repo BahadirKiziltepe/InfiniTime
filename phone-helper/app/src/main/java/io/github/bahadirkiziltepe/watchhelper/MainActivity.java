@@ -80,6 +80,7 @@ public class MainActivity extends Activity {
 
   private Ui.Status notifyStatus;
   private Ui.Status callStatus;
+  private Ui.Status claudeStatus;
   private TextView allowCallsButton;
 
   private Ui.Status updateStatus;
@@ -248,9 +249,12 @@ public class MainActivity extends Activity {
     phone.addView(notifyStatus.view);
     callStatus = ui.new Status();
     ui.add(phone, callStatus.view, 16);
+    claudeStatus = ui.new Status();
+    ui.add(phone, claudeStatus.view, 16);
     allowCallsButton = ui.button("Allow calls", Ui.FILLED, v -> askForCalls());
     ui.add(phone, ui.flow(allowCallsButton,
-        ui.button("Send a test notification", Ui.TONAL, v -> core.notifications.sendTest())), 16);
+        ui.button("Send a test notification", Ui.TONAL, v -> core.notifications.sendTest()),
+        ui.button("Test the Claude dot", Ui.TONAL, v -> core.testClaude())), 16);
 
     // Watch software
     root.addView(ui.caption("Watch software"));
@@ -357,6 +361,7 @@ public class MainActivity extends Activity {
 
     setTopic(notifyStatus, "Notifications", core.notifications.describe());
     setTopic(callStatus, "Calls", core.calls.describe());
+    setTopic(claudeStatus, "Claude", core.describeClaude());
     Ui.show(allowCallsButton, core.calls.missingPermissions().length > 0);
 
     renderUpdater();

@@ -63,6 +63,7 @@ namespace {
   //        flags (bit 0: alert the wearer), length of the app name, the app name
   //   0x04 the next piece of its text: the title, a 0 byte, then the message
   //   0x05 the notification is complete: show it
+  //   0x06 something new is waiting that only shows as the dot on the main screen: buzz for it
   //   0x02 take a notification back: number (2 bytes)
   //   0x03 take all notifications back
   //   0x10 call: state (0 none, 1 ringing, 2 in a call), then the start of the caller's name
@@ -81,6 +82,7 @@ namespace {
   constexpr uint8_t PhoneNotificationClear {0x03};
   constexpr uint8_t PhoneNotificationText {0x04};
   constexpr uint8_t PhoneNotificationEnd {0x05};
+  constexpr uint8_t PhoneMarkAlert {0x06};
   constexpr uint8_t PhoneCall {0x10};
   constexpr uint8_t PhoneCallMore {0x11};
   constexpr uint8_t PhoneListBegin {0x20};
@@ -241,6 +243,9 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       break;
     case PhoneNotificationClear:
       notificationManager.Clear();
+      break;
+    case PhoneMarkAlert:
+      systemTask.PushMessage(Pinetime::System::Messages::OnWaitingMark);
       break;
     case PhoneCall: {
       if (length < 2 || message[1] > static_cast<uint8_t>(Notifications::CallStates::Active)) {

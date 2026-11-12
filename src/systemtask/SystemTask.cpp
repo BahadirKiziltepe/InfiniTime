@@ -231,6 +231,15 @@ void SystemTask::Work() {
             displayApp.PushMessage(Pinetime::Applications::Display::Messages::NewNotification);
           }
           break;
+        case Messages::OnWaitingMark:
+          // Something new is waiting on the phone that the watch only marks with a dot on its main
+          // screen. It gets the buzz of a notification and the screen comes on, but no
+          // notification is shown. Quiet when alerts are switched off, like everything else.
+          if (settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On) {
+            GoToRunning();
+            displayApp.PushMessage(Pinetime::Applications::Display::Messages::WaitingMark);
+          }
+          break;
         case Messages::OnNewCall:
           // The phone is ringing. Like notifications, calls stay quiet when alerts are switched off.
           if (settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On) {
