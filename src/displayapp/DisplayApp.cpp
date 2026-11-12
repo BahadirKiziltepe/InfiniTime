@@ -261,13 +261,46 @@ void DisplayApp::Refresh() {
         }
       }
       break;
-    case States::Running:
+    case States::Running: {
       if (!currentScreen->IsRunning()) {
         LoadPreviousScreen();
       }
       queueTimeout = lv_task_handler();
 
-      if (!systemTask->IsSleepDisabled() && IsPastDimTime()) {
+      // A call keeps the watch awake, whichever screen is showing, so that it can be ended from
+      // the wrist at any moment. Nothing puts the watch to sleep while this is held: not the
+      // timeout, not the button, not lowering the arm.
+      const bool onCall = notificationManager.CallState() != Controllers::NotificationManager::CallStates::Idle;
+      if (onCall != awakeForCall) {
+        awakeForCall = onCall;
+        PushMessageToSystemTask(onCall ? System::Messages::DisableSleeping : System::Messages::EnableSleeping);
+      }
+
+      if (onCall) {
+        if (IsPastSleepTime()) {
+          // Nothing was touched for as long as it takes the screen to switch off.
+          // An update of the watch or a pairing code is not pushed aside for the call.
+          const bool leaveAlone = currentApp == Apps::FirmwareUpdate || currentApp == Apps::PassKey;
+          if (currentApp != Apps::Call && !leaveAlone) {
+            // Instead of going to sleep, the watch goes back to the call. The call screen lies
+            // right above the main screen, whatever was open before.
+            const bool fromBelow = currentApp == Apps::Clock || currentApp == Apps::Queue || currentApp == Apps::Playlists ||
+                                   currentApp == Apps::Songs;
+            returnAppStack.Reset();
+            appStackDirections.Reset();
+            returnAppStack.Push(Apps::Clock);
+            appStackDirections.Push(DisplayApp::FullRefreshDirections::Down);
+            LoadScreen(Apps::Call, fromBelow ? DisplayApp::FullRefreshDirections::Down : DisplayApp::FullRefreshDirections::Up);
+          } else if (currentApp == Apps::Call && !isDimmed) {
+            // On the call screen the light is turned down to save the battery. A touch turns it up again.
+            isDimmed = true;
+            brightnessController.Set(Controllers::BrightnessController::Levels::Low);
+          }
+        } else if (isDimmed) {
+          isDimmed = false;
+          ApplyBrightness();
+        }
+      } else if (!systemTask->IsSleepDisabled() && IsPastDimTime()) {
         if (!isDimmed) {
           isDimmed = true;
           brightnessController.Set(Controllers::BrightnessController::Levels::Low);
@@ -292,6 +325,7 @@ void DisplayApp::Refresh() {
         ApplyBrightness();
       }
       break;
+    }
     default:
       queueTimeout = portMAX_DELAY;
       break;
@@ -386,6 +420,16 @@ void DisplayApp::Refresh() {
         lv_disp_trig_activity(nullptr);
         ApplyBrightness();
         state = States::Running;
+        // Woken in the middle of a call that began while the watch was asleep: show the call, not
+        // the main screen. (A ringing call brings its own screen up, with the buzz; see IncomingCall.)
+        if (currentApp == Apps::Clock &&
+            notificationManager.CallState() == Controllers::NotificationManager::CallStates::Active) {
+          returnAppStack.Reset();
+          appStackDirections.Reset();
+          returnAppStack.Push(Apps::Clock);
+          appStackDirections.Push(DisplayApp::FullRefreshDirections::Down);
+          LoadScreen(Apps::Call, DisplayApp::FullRefreshDirections::None);
+        }
         break;
       case Messages::UpdateBleConnection:
         // Only used for recovery firmware
