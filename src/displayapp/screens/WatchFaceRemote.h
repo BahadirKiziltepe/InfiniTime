@@ -27,11 +27,15 @@ namespace Pinetime {
     namespace Screens {
 
       /**
-       * Main screen: the clock on top and a music remote below it.
+       * Main screen: a music remote with the clock in the top left corner.
        *
-       * - The three buttons send previous / play-pause / next to the phone.
+       * - Top bar: time on the left, bluetooth and battery on the right.
+       * - Below it: track, artist and a progress bar.
+       * - First row of buttons: previous / play-pause / next.
+       * - Second row: shuffle / repeat / add. These need a phone-side helper that does not exist yet,
+       *   so for now they are drawn dimmed and do not react.
        * - Swiping left or right lowers or raises the phone's media volume.
-       * - Swiping up or down is left to DisplayApp (settings / notifications).
+       * - Swiping up or down is left to DisplayApp (quick settings / notifications).
        */
       class WatchFaceRemote : public Screen {
       public:
@@ -69,8 +73,12 @@ namespace Pinetime {
         lv_obj_t* btnPlayPause;
         lv_obj_t* btnNext;
         lv_obj_t* labelPlayPause;
+        lv_obj_t* btnShuffle;
+        lv_obj_t* btnRepeat;
+        lv_obj_t* btnAdd;
 
         lv_style_t btnStyle;
+        lv_style_t extraBtnStyle;
 
         Controllers::DateTime& dateTimeController;
         const Controllers::Ble& bleController;

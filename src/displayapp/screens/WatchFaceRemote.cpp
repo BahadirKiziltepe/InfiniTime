@@ -16,18 +16,36 @@
 using namespace Pinetime::Applications::Screens;
 
 namespace {
-  // Vertical offsets of each row, measured from the centre of the 240x240 screen.
-  // Rows are placed by their centre so the layout does not depend on a font's line spacing.
-  constexpr lv_coord_t timeOffsetY = -63;
-  constexpr lv_coord_t trackOffsetY = -17;
-  constexpr lv_coord_t artistOffsetY = 9;
-  constexpr lv_coord_t progressOffsetY = 31;
+  // Layout of the 240x240 screen.
+  //
+  //   y   0.. 46  top bar: time (left), bluetooth + battery (right), markers under them
+  //   y  50.. 78  track
+  //   y  76..104  artist
+  //   y 110..114  progress bar
+  //   y 124..186  previous / play-pause / next
+  //   y 190..240  shuffle / repeat / add
+  //
+  // Text rows are placed by their centre, as offsets from the centre of the screen,
+  // so the layout does not depend on a font's line spacing.
+  constexpr lv_coord_t timeOffsetX = 4;
+  constexpr lv_coord_t timeOffsetY = -97;
+  constexpr lv_coord_t trackOffsetY = -56;
+  constexpr lv_coord_t artistOffsetY = -30;
+  constexpr lv_coord_t progressOffsetY = -8;
 
-  constexpr lv_coord_t textWidth = 228;
-  constexpr lv_coord_t progressWidth = 200;
+  // Second line of the top bar, under the bluetooth and battery icons
+  constexpr lv_coord_t markerOffsetY = 24;
+
+  constexpr lv_coord_t textWidth = 232;
+  constexpr lv_coord_t progressWidth = 224;
   constexpr lv_coord_t progressHeight = 4;
+
   constexpr lv_coord_t buttonWidth = 76;
-  constexpr lv_coord_t buttonHeight = 72;
+  constexpr lv_coord_t buttonMargin = 3;
+  constexpr lv_coord_t mainButtonHeight = 62;
+  constexpr lv_coord_t extraButtonHeight = 50;
+  constexpr lv_coord_t rowGap = 4;
+  constexpr lv_coord_t mainRowOffsetY = -(extraButtonHeight + rowGap);
 
   // One swipe moves the phone's media volume by this many steps
   constexpr uint8_t volumeStepsPerSwipe = 3;
@@ -46,6 +64,14 @@ namespace {
   void ButtonEventHandler(lv_obj_t* obj, lv_event_t event) {
     auto* screen = static_cast<WatchFaceRemote*>(obj->user_data);
     screen->OnButtonEvent(obj, event);
+  }
+
+  lv_obj_t* MakeButton(lv_style_t* style, lv_coord_t height, lv_align_t align, lv_coord_t offsetX, lv_coord_t offsetY) {
+    lv_obj_t* button = lv_btn_create(lv_scr_act(), nullptr);
+    lv_obj_set_size(button, buttonWidth, height);
+    lv_obj_align(button, nullptr, align, offsetX, offsetY);
+    lv_obj_add_style(button, LV_BTN_PART_MAIN, style);
+    return button;
   }
 }
 
@@ -66,30 +92,30 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
     musicService {musicService},
     statusIcons(batteryController, bleController, alarmController) {
 
-  // Top row: new-notification marker, AM/PM, volume hint, bluetooth and battery
+  // Top bar, right: bluetooth and battery, and under them the new-notification marker and the volume hint
   statusIcons.Create();
 
   notificationIcon = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(notificationIcon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_LIME);
   lv_label_set_text_static(notificationIcon, NotificationIcon::GetIcon(false));
-  lv_obj_align(notificationIcon, nullptr, LV_ALIGN_IN_TOP_LEFT, 0, 0);
-
-  labelAmPm = lv_label_create(lv_scr_act(), nullptr);
-  lv_obj_set_style_local_text_color(labelAmPm, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
-  lv_label_set_text_static(labelAmPm, "");
-  lv_obj_align(labelAmPm, nullptr, LV_ALIGN_IN_TOP_LEFT, 28, 0);
+  lv_obj_align(notificationIcon, nullptr, LV_ALIGN_IN_TOP_RIGHT, -30, markerOffsetY);
 
   labelVolume = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelVolume, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::orange);
   lv_label_set_text_static(labelVolume, Symbols::volumUp);
-  lv_obj_align(labelVolume, nullptr, LV_ALIGN_IN_TOP_MID, 0, 0);
+  lv_obj_align(labelVolume, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, markerOffsetY);
   lv_obj_set_hidden(labelVolume, true);
 
-  // Clock
+  // Top bar, left: the time, with AM/PM next to it in 12-hour mode
   labelTime = lv_label_create(lv_scr_act(), nullptr);
-  lv_obj_set_style_local_text_font(labelTime, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &jetbrains_mono_extrabold_compressed);
+  lv_obj_set_style_local_text_font(labelTime, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &jetbrains_mono_42);
   lv_label_set_text_static(labelTime, "00:00");
-  lv_obj_align(labelTime, lv_scr_act(), LV_ALIGN_CENTER, 0, timeOffsetY);
+  lv_obj_align(labelTime, lv_scr_act(), LV_ALIGN_IN_LEFT_MID, timeOffsetX, timeOffsetY);
+
+  labelAmPm = lv_label_create(lv_scr_act(), nullptr);
+  lv_obj_set_style_local_text_color(labelAmPm, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
+  lv_label_set_text_static(labelAmPm, "");
+  lv_obj_align(labelAmPm, labelTime, LV_ALIGN_OUT_RIGHT_MID, 6, 6);
 
   // Track and artist. Text that does not fit scrolls.
   labelTrack = lv_label_create(lv_scr_act(), nullptr);
@@ -117,39 +143,45 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   lv_obj_align(barProgress, lv_scr_act(), LV_ALIGN_CENTER, 0, progressOffsetY);
   lv_obj_set_hidden(barProgress, true);
 
-  // Previous / play-pause / next
+  // First row of buttons: previous / play-pause / next
   lv_style_init(&btnStyle);
   lv_style_set_radius(&btnStyle, LV_STATE_DEFAULT, 20);
   lv_style_set_bg_color(&btnStyle, LV_STATE_DEFAULT, Colors::bgAlt);
 
-  lv_obj_t* label;
-
-  btnPrev = lv_btn_create(lv_scr_act(), nullptr);
+  btnPrev = MakeButton(&btnStyle, mainButtonHeight, LV_ALIGN_IN_BOTTOM_LEFT, buttonMargin, mainRowOffsetY);
   btnPrev->user_data = this;
   lv_obj_set_event_cb(btnPrev, ButtonEventHandler);
-  lv_obj_set_size(btnPrev, buttonWidth, buttonHeight);
-  lv_obj_align(btnPrev, nullptr, LV_ALIGN_IN_BOTTOM_LEFT, 3, 0);
-  lv_obj_add_style(btnPrev, LV_BTN_PART_MAIN, &btnStyle);
-  label = lv_label_create(btnPrev, nullptr);
-  lv_label_set_text_static(label, Symbols::stepBackward);
+  lv_label_set_text_static(lv_label_create(btnPrev, nullptr), Symbols::stepBackward);
 
-  btnNext = lv_btn_create(lv_scr_act(), nullptr);
-  btnNext->user_data = this;
-  lv_obj_set_event_cb(btnNext, ButtonEventHandler);
-  lv_obj_set_size(btnNext, buttonWidth, buttonHeight);
-  lv_obj_align(btnNext, nullptr, LV_ALIGN_IN_BOTTOM_RIGHT, -3, 0);
-  lv_obj_add_style(btnNext, LV_BTN_PART_MAIN, &btnStyle);
-  label = lv_label_create(btnNext, nullptr);
-  lv_label_set_text_static(label, Symbols::stepForward);
-
-  btnPlayPause = lv_btn_create(lv_scr_act(), nullptr);
+  btnPlayPause = MakeButton(&btnStyle, mainButtonHeight, LV_ALIGN_IN_BOTTOM_MID, 0, mainRowOffsetY);
   btnPlayPause->user_data = this;
   lv_obj_set_event_cb(btnPlayPause, ButtonEventHandler);
-  lv_obj_set_size(btnPlayPause, buttonWidth, buttonHeight);
-  lv_obj_align(btnPlayPause, nullptr, LV_ALIGN_IN_BOTTOM_MID, 0, 0);
-  lv_obj_add_style(btnPlayPause, LV_BTN_PART_MAIN, &btnStyle);
   labelPlayPause = lv_label_create(btnPlayPause, nullptr);
   lv_label_set_text_static(labelPlayPause, Symbols::play);
+
+  btnNext = MakeButton(&btnStyle, mainButtonHeight, LV_ALIGN_IN_BOTTOM_RIGHT, -buttonMargin, mainRowOffsetY);
+  btnNext->user_data = this;
+  lv_obj_set_event_cb(btnNext, ButtonEventHandler);
+  lv_label_set_text_static(lv_label_create(btnNext, nullptr), Symbols::stepForward);
+
+  // Second row: shuffle / repeat / add.
+  // The stock companion apps only understand play, pause, next, previous and volume, so these
+  // need a phone-side helper. Until it exists they are drawn dimmed and do not react to taps.
+  lv_style_init(&extraBtnStyle);
+  lv_style_set_radius(&extraBtnStyle, LV_STATE_DEFAULT, 16);
+  lv_style_set_bg_color(&extraBtnStyle, LV_STATE_DEFAULT, Colors::bgDark);
+
+  auto makeExtraButton = [this](lv_align_t align, lv_coord_t offsetX, const char* symbol) {
+    lv_obj_t* button = MakeButton(&extraBtnStyle, extraButtonHeight, align, offsetX, 0);
+    lv_obj_set_click(button, false);
+    lv_obj_t* icon = lv_label_create(button, nullptr);
+    lv_obj_set_style_local_text_color(icon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::gray);
+    lv_label_set_text_static(icon, symbol);
+    return button;
+  };
+  btnShuffle = makeExtraButton(LV_ALIGN_IN_BOTTOM_LEFT, buttonMargin, Symbols::shuffle);
+  btnRepeat = makeExtraButton(LV_ALIGN_IN_BOTTOM_MID, 0, Symbols::repeat);
+  btnAdd = makeExtraButton(LV_ALIGN_IN_BOTTOM_RIGHT, -buttonMargin, Symbols::plus);
 
   taskRefresh = lv_task_create(RefreshTaskCallback, LV_DISP_DEF_REFR_PERIOD, LV_TASK_PRIO_MID, this);
   Refresh();
@@ -158,6 +190,7 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
 WatchFaceRemote::~WatchFaceRemote() {
   lv_task_del(taskRefresh);
   lv_style_reset(&btnStyle);
+  lv_style_reset(&extraBtnStyle);
   lv_obj_clean(lv_scr_act());
 }
 
@@ -167,6 +200,7 @@ void WatchFaceRemote::Refresh() {
   notificationState = notificationManager.AreNewNotificationsAvailable();
   if (notificationState.IsUpdated()) {
     lv_label_set_text_static(notificationIcon, NotificationIcon::GetIcon(notificationState.Get()));
+    lv_obj_realign(notificationIcon);
   }
 
   currentDateTime = std::chrono::time_point_cast<std::chrono::minutes>(dateTimeController.CurrentDateTime());
@@ -187,6 +221,7 @@ void WatchFaceRemote::Refresh() {
       lv_label_set_text_fmt(labelTime, "%02d:%02d", hour, minute);
     }
     lv_obj_realign(labelTime);
+    lv_obj_realign(labelAmPm);
   }
 
   const TickType_t now = xTaskGetTickCount();
