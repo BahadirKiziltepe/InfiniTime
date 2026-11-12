@@ -27,6 +27,7 @@
 #include "displayapp/screens/FlashLight.h"
 #include "displayapp/screens/BatteryInfo.h"
 #include "displayapp/screens/Steps.h"
+#include "displayapp/screens/PhoneList.h"
 #include "displayapp/screens/Dice.h"
 #include "displayapp/screens/Weather.h"
 #include "displayapp/screens/PassKey.h"
@@ -322,7 +323,9 @@ void DisplayApp::Refresh() {
         }
         // Since the active screen is not really an app, go back to Clock.
         if (currentApp == Apps::Launcher || currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview ||
-            currentApp == Apps::Call || currentApp == Apps::QuickSettings || currentApp == Apps::Settings) {
+            currentApp == Apps::Call || currentApp == Apps::QuickSettings || currentApp == Apps::Settings ||
+            currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs ||
+            currentApp == Apps::Contacts || currentApp == Apps::Steps) {
           LoadScreen(Apps::Clock, DisplayApp::FullRefreshDirections::None);
           // The main screen is the start of every way back again. Without this, each time the watch
           // fell asleep on one of these screens an entry was left behind, until the list was full and
@@ -355,10 +358,10 @@ void DisplayApp::Refresh() {
         break;
       case Messages::IncomingCall:
         // The phone is ringing. The call screen comes up and buzzes; for as long as the call lasts it
-        // then sits between the main screen and the notifications.
+        // then sits between the main screen and the notifications above it.
         if (currentApp != Apps::Call) {
           ringOnCallScreen = true;
-          LoadNewScreen(Apps::Call, DisplayApp::FullRefreshDirections::Up);
+          LoadNewScreen(Apps::Call, DisplayApp::FullRefreshDirections::Down);
         }
         break;
       case Messages::ShakeToSleep:
@@ -388,10 +391,10 @@ void DisplayApp::Refresh() {
         // Only used for recovery firmware
         break;
       case Messages::NewNotification:
-        // Comes up from the bottom, where the notifications live. Not over the call screen, though:
+        // Comes down from the top, where the notifications live. Not over the call screen, though:
         // a message must not hide a ringing call. It is in the list all the same.
         if (currentApp != Apps::Call) {
-          LoadNewScreen(Apps::NotificationsPreview, DisplayApp::FullRefreshDirections::Up);
+          LoadNewScreen(Apps::NotificationsPreview, DisplayApp::FullRefreshDirections::Down);
         }
         break;
       case Messages::TimerDone: {
@@ -444,29 +447,44 @@ void DisplayApp::Refresh() {
           }
         };
         if (!currentScreen->OnTouchEvent(gesture)) {
+          // How the screens lie next to each other. Up and down move between the rows, and a
+          // row continues to the right:
+          //
+          //   settings       ->  steps
+          //   notifications  ->  contacts
+          //   (the call, while there is one)
+          //   MAIN SCREEN        left and right change the volume there
+          //   queue          ->  playlists  ->  songs
+          //
+          // The main screen has no app launcher, and a double tap does not put the watch to sleep
+          // because on that screen it means "next track".
+          const bool onNotifications = currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview;
           if (currentApp == Apps::Clock) {
-            // The main screen is a music remote. It handles left/right swipes itself (volume),
-            // there is no app launcher, and a double tap does not put the watch to sleep
-            // because on that screen it means "next track".
-            // The quick settings sit above the main screen and the notifications below it.
             switch (gesture) {
               case TouchEvents::SwipeDown:
-                LoadNewScreen(Apps::QuickSettings, DisplayApp::FullRefreshDirections::Down);
-                break;
-              case TouchEvents::SwipeUp:
                 // While the phone rings or is in a call, the call screen comes first and the
                 // notifications are one swipe further
                 if (notificationManager.CallState() != Controllers::NotificationManager::CallStates::Idle) {
-                  LoadNewScreen(Apps::Call, DisplayApp::FullRefreshDirections::Up);
+                  LoadNewScreen(Apps::Call, DisplayApp::FullRefreshDirections::Down);
                 } else {
-                  LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Up);
+                  LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
                 }
+                break;
+              case TouchEvents::SwipeUp:
+                LoadNewScreen(Apps::Queue, DisplayApp::FullRefreshDirections::Up);
                 break;
               default:
                 break;
             }
           } else if (gesture == LoadDirToReturnSwipe(appStackDirections.Top())) {
             LoadPreviousScreen();
+          } else if (onNotifications && gesture == TouchEvents::SwipeDown) {
+            // The notification screen only passes this on once its text is scrolled to the top
+            LoadNewScreen(Apps::QuickSettings, DisplayApp::FullRefreshDirections::Down);
+          } else if (onNotifications && gesture == TouchEvents::SwipeLeft) {
+            LoadNewScreen(Apps::Contacts, DisplayApp::FullRefreshDirections::LeftAnim);
+          } else if (currentApp == Apps::QuickSettings && gesture == TouchEvents::SwipeLeft) {
+            LoadNewScreen(Apps::Steps, DisplayApp::FullRefreshDirections::LeftAnim);
           }
         } else {
           lvgl.CancelTap();
@@ -483,8 +501,8 @@ void DisplayApp::Refresh() {
         break;
       case Messages::ButtonLongPressed:
         if (currentApp != Apps::Clock) {
-          // Notifications and the call screen are below the main screen, everything else is above it
-          if (currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview || currentApp == Apps::Call) {
+          // The queue and the lists next to it are below the main screen, everything else is above it
+          if (currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs) {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Down);
           } else {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Up);
@@ -499,7 +517,7 @@ void DisplayApp::Refresh() {
         break;
       case Messages::ButtonDoubleClicked:
         if (currentApp != Apps::Notifications && currentApp != Apps::NotificationsPreview) {
-          LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Up);
+          LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
         }
         break;
 
@@ -595,6 +613,7 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
       currentScreen = std::make_unique<Screens::Notifications>(notificationManager,
                                                                motorController,
                                                                settingsController,
+                                                               systemTask->nimble().music(),
                                                                *systemTask,
                                                                Screens::Notifications::Modes::Normal);
       break;
@@ -602,6 +621,7 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
       currentScreen = std::make_unique<Screens::Notifications>(notificationManager,
                                                                motorController,
                                                                settingsController,
+                                                               systemTask->nimble().music(),
                                                                *systemTask,
                                                                Screens::Notifications::Modes::Preview);
       break;
@@ -614,6 +634,22 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
                                                       ringOnCallScreen);
       ringOnCallScreen = false;
       break;
+    case Apps::Queue:
+    case Apps::Playlists:
+    case Apps::Songs:
+    case Apps::Contacts: {
+      using Kinds = Controllers::PhoneLists::Kinds;
+      const Kinds kind = app == Apps::Queue       ? Kinds::Queue
+                         : app == Apps::Playlists ? Kinds::Playlists
+                         : app == Apps::Songs     ? Kinds::Songs
+                                                  : Kinds::Contacts;
+      currentScreen = std::make_unique<Screens::PhoneList>(this,
+                                                           kind,
+                                                           systemTask->nimble().music(),
+                                                           notificationManager,
+                                                           bleController,
+                                                           motorController);
+    } break;
     case Apps::QuickSettings:
       currentScreen = std::make_unique<Screens::QuickSettings>(this,
                                                                batteryController,

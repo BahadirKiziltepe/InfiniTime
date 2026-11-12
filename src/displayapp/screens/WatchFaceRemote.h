@@ -99,6 +99,7 @@ namespace Pinetime {
         Controllers::MusicService& musicService;
 
         std::string track;
+        bool smartPick = false;
         std::string artist;
         bool trackDrawn = false;
         bool shownConnected = false;

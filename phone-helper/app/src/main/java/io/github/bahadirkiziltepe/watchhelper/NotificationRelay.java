@@ -90,6 +90,7 @@ final class NotificationRelay {
   private int skippedCount;
   private String lastSkipped = "";
 
+  private int clearedFromWatch;
   private final Runnable refill = this::pushAll;
   private final Runnable endTest = this::removeTest;
 
@@ -231,6 +232,29 @@ final class NotificationRelay {
         alertCount++;
       }
     }
+  }
+
+  /**
+   * The wearer held a notification on the watch: clear it on the phone. Android then reports it
+   * gone like any other, and that takes it off the watch.
+   */
+  void dismiss(int id) {
+    if (id == TEST_ID) {
+      main.removeCallbacks(endTest);
+      removeTest();
+      return;
+    }
+    for (Map.Entry<String, Entry> known : shown.entrySet()) {
+      if (known.getValue().id == id) {
+        boolean asked = MediaListenerService.dismiss(known.getKey());
+        clearedFromWatch++;
+        log.add("notify", known.getValue().label + " notification cleared from the watch"
+            + (asked ? "" : " (Android could not be asked; notification access is not up)"));
+        return;
+      }
+    }
+    // The phone no longer has it. Make sure the watch does not either.
+    watch.sendPhone(PhoneFrames.remove(id));
   }
 
   /** Empties the watch's list and fills it again with the newest ones, without buzzing. */
@@ -478,7 +502,8 @@ final class NotificationRelay {
     }
     sb.append('\n');
     sb.append("Sent to the watch: ").append(sentCount).append(", of those with a buzz: ").append(alertCount)
-        .append(", taken back: ").append(takenBackCount).append('\n');
+        .append(", taken back: ").append(takenBackCount).append(", cleared from the watch: ")
+        .append(clearedFromWatch).append('\n');
     sb.append("Not passed on: ").append(skippedCount).append(lastSkipped.isEmpty() ? "" : ", last because: " + lastSkipped)
         .append('\n');
     return sb.toString();

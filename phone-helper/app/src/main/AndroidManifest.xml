@@ -7,8 +7,12 @@
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
 
-    <!-- Download watch builds from this project's GitHub releases page. -->
+    <!-- Download watch builds from this project's GitHub releases page, and ask Spotify's web
+         service for the playlists and the queue. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Keep the phone awake for the few seconds it takes to answer the watch when it asks for a list. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Ask Android not to put the app to sleep, so the watch stays connected. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -23,6 +27,9 @@
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- Start a call to one of the people chosen for the watch, when the watch asks for it. -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
 
     <!-- Turn the volume of a call up or down from the watch. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -47,15 +54,25 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@android:style/Theme.DeviceDefault.DayNight">
+        android:theme="@style/AppTheme">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The "Back to Watch Helper" link on the page the browser shows after the Spotify login. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="spotify-login"
+                    android:scheme="watchhelper" />
             </intent-filter>
         </activity>
 

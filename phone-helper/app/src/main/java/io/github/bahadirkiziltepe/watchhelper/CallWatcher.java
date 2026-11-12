@@ -104,6 +104,10 @@ final class CallWatcher {
   private int phoneState = TelephonyManager.CALL_STATE_IDLE;
   /** Who the ordinary phone call is with: a contact's name, or the number. Never logged. */
   private String phoneCaller = "";
+  /** Who the watch last asked to call, and when: the name for that call until Android gives one. */
+  private String placedName = "";
+  private long placedAt = -PLACED_NAME_MS;
+  private static final long PLACED_NAME_MS = 90_000;
   private boolean phoneNumberSeen;
   private String lastPhoneAppShape = "";
 
@@ -412,6 +416,10 @@ final class CallWatcher {
     } else if (state == PhoneFrames.CALL_ACTIVE) {
       CallNote note = ongoingNote();
       name = note != null && !note.name.isEmpty() ? note.name : !phoneCaller.isEmpty() ? phoneCaller : lastName;
+      if (name.isEmpty() && android.os.SystemClock.elapsedRealtime() - placedAt < PLACED_NAME_MS) {
+        // A call the watch started: Android has not said who it is with, but the watch list has.
+        name = placedName;
+      }
     }
     if (!name.isEmpty()) {
       lastName = name;
@@ -451,7 +459,7 @@ final class CallWatcher {
     List<String> missing = new ArrayList<>();
     for (String permission : new String[] {Manifest.permission.ANSWER_PHONE_CALLS,
         Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG,
-        Manifest.permission.READ_CONTACTS}) {
+        Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE}) {
       if (!has(permission)) {
         missing.add(permission);
       }
@@ -500,6 +508,40 @@ final class CallWatcher {
       }
     }
     press(note, answer, what);
+  }
+
+  /**
+   * Starts a phone call to one of the people on the watch list. Returns null if Android took the
+   * call, otherwise a few words for the watch on why not.
+   */
+  String place(String name, String number) {
+    if (!has(Manifest.permission.CALL_PHONE)) {
+      note("watch: call someone from the watch list, but making calls is not allowed yet");
+      return "Allow calls first";
+    }
+    if (state() != PhoneFrames.CALL_NONE) {
+      note("watch: call someone from the watch list, but there is a call already");
+      return "Already in a call";
+    }
+    try {
+      TelecomManager telecom = app.getSystemService(TelecomManager.class);
+      if (telecom == null) {
+        return "No phone here";
+      }
+      telecom.placeCall(Uri.fromParts("tel", number, null), new Bundle());
+      placedName = name == null ? "" : name;
+      placedAt = android.os.SystemClock.elapsedRealtime();
+      note("watch: call someone from the watch list (asked Android)");
+      return null;
+    } catch (RuntimeException e) {
+      log.add("call", "Android would not start the call: " + e.getClass().getSimpleName());
+      return "Phone said no";
+    }
+  }
+
+  /** True when the watch may start calls. */
+  boolean mayPlaceCalls() {
+    return has(Manifest.permission.CALL_PHONE);
   }
 
   /** Ends the call that is under way. */

@@ -218,9 +218,9 @@ bool Call::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
         volumeHintTick = xTaskGetTickCount();
       }
       return true;
-    case TouchEvents::SwipeUp:
-      // The notifications are one further down
-      app->StartApp(Apps::Notifications, DisplayApp::FullRefreshDirections::Up);
+    case TouchEvents::SwipeDown:
+      // The notifications are one further up
+      app->StartApp(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
       return true;
     default:
       return false;

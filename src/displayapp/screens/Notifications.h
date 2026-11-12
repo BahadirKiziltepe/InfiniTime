@@ -12,6 +12,7 @@
 namespace Pinetime {
   namespace Controllers {
     class MotorController;
+    class MusicService;
     class Settings;
   }
 
@@ -25,11 +26,14 @@ namespace Pinetime {
        * - Then who it is from, the message, and at the bottom which one of how many this is.
        *   A conversation's unread messages arrive as one notification, with a blank line between them.
        * - A tap goes to the next notification, a double tap goes back. Both wrap around.
-       * - Text that does not fit scrolls: swipe up to read on, swipe down to go back up. Swiping down
-       *   at the top leaves the screen.
-       * - Nothing is cleared here. A notification goes away when the phone takes it back, which the
-       *   Watch Helper phone app does when it is cleared or read on the phone. Notices from the watch
-       *   itself have no phone behind them; they go once this screen has been opened and closed.
+       * - Text that does not fit scrolls: swipe up to read on, swipe down to go back up.
+       * - The screen lies above the main screen and below the settings. Swiping up at the end of the
+       *   text leads back to the main screen, swiping down at its top leads on to the settings, and
+       *   the contacts are one swipe to the left.
+       * - Holding the screen clears the notification on the phone. A notification goes away when the
+       *   phone takes it back, which the Watch Helper phone app does when it is cleared or read on the
+       *   phone - or was just cleared from here. Notices from the watch itself have no phone behind
+       *   them; they go once this screen has been opened and closed, or when they are held.
        *
        * In Preview mode the screen has come up by itself for a new notification. It closes again after
        * a few seconds unless the screen is touched; from then on it behaves like the normal one.
@@ -40,6 +44,7 @@ namespace Pinetime {
         Notifications(Pinetime::Controllers::NotificationManager& notificationManager,
                       Pinetime::Controllers::MotorController& motorController,
                       Pinetime::Controllers::Settings& settingsController,
+                      Pinetime::Controllers::MusicService& musicService,
                       System::SystemTask& systemTask,
                       Modes mode);
         ~Notifications() override;
@@ -55,6 +60,7 @@ namespace Pinetime {
         Pinetime::Controllers::NotificationManager& notificationManager;
         Pinetime::Controllers::MotorController& motorController;
         Pinetime::Controllers::Settings& settingsController;
+        Pinetime::Controllers::MusicService& musicService;
         Modes mode;
         System::WakeLock wakeLock;
 
@@ -90,6 +96,10 @@ namespace Pinetime {
         TickType_t shownTick = 0;
         bool pinned = false;
         bool swallowTap = false;
+
+        // The phone was asked to clear the notification that is showing and has not done it yet
+        bool clearing = false;
+        TickType_t clearingTick = 0;
 
         lv_task_t* taskRefresh;
       };

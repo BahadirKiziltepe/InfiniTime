@@ -88,6 +88,7 @@ namespace {
 
   // Smart shuffle: the shuffle arrows with a star. Repeat one song: the repeat arrows with a 1.
   constexpr const char* shuffleSmartText = "\xEF\x81\xB4\xEF\x80\x85";
+  constexpr const char* smartPickPrefix = "\xEF\x80\x85 ";
   constexpr const char* repeatOneText = "\xEF\x81\xB9"
                                         "1";
 
@@ -438,17 +439,25 @@ void WatchFaceRemote::UpdateMusic(TickType_t now) {
   const bool connected = bleController.IsConnected();
 
   std::string newTrack = connected ? musicService.getTrack() : std::string {};
-  if (!trackDrawn || connected != shownConnected || newTrack != track) {
+  // A song Spotify picked itself (Smart Shuffle) gets the star of the shuffle button in front of
+  // its name, in the same green
+  const bool newSmartPick = connected && !newTrack.empty() && musicService.isSmartPick();
+  if (!trackDrawn || connected != shownConnected || newTrack != track || newSmartPick != smartPick) {
     trackDrawn = true;
     shownConnected = connected;
     track = std::move(newTrack);
+    smartPick = newSmartPick;
     if (!connected) {
       lv_label_set_text_static(labelTrack, "Phone not connected");
     } else if (track.empty()) {
       lv_label_set_text_static(labelTrack, "Not playing");
+    } else if (smartPick) {
+      const std::string marked = std::string {smartPickPrefix} + track;
+      lv_label_set_text(labelTrack, marked.c_str());
     } else {
       lv_label_set_text(labelTrack, track.c_str());
     }
+    lv_obj_set_style_local_text_color(labelTrack, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, smartPick ? extraOnColor : LV_COLOR_WHITE);
     lv_obj_set_hidden(labelPlayer, !connected);
   }
 

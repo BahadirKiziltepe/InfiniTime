@@ -43,6 +43,10 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   static final int EVENT_CALL_VOLUME_DOWN = 0x23;
   // Holding the call screen during a call (watch build 7 and newer).
   static final int EVENT_CALL_HANG_UP = 0x24;
+  // Longer messages (watch build 8 and newer): the watch's lists, and clearing a notification.
+  static final int REQUEST_FIRST = 0x30;
+  static final int REQUEST_LAST = 0x3f;
+  static final int REQUEST_DISMISS = 0x32;
 
   /** Android announces every volume change under this name. It is not in the public list of names. */
   private static final String VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION";
@@ -69,6 +73,15 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   final Updater updater;
   final NotificationRelay notifications;
   final CallWatcher calls;
+  final ContactStore contacts;
+  final SpotifyAccount account;
+  final MusicLibrary library;
+  final WatchLists lists;
+  /**
+   * Keeps the phone awake for the few seconds it takes to answer the watch. Without it a phone
+   * that is lying idle can doze off in the middle of asking Spotify, and the watch waits in vain.
+   */
+  private final PowerManager.WakeLock answering;
   private boolean watchWasReady;
   /** The phone's battery in percent, as last announced by Android. */
   private int phoneBattery = UNKNOWN_LEVEL;
@@ -83,6 +96,21 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     this.updater = new Updater(app, main, log, watch, buildNumber(), this);
     this.notifications = new NotificationRelay(main, log, watch);
     this.calls = new CallWatcher(app, main, log, watch, this::changed);
+    this.contacts = new ContactStore(app);
+    this.account = new SpotifyAccount(app, main, log, this::onAccountChanged);
+    this.library = new MusicLibrary(account, log, () -> main.post(spotify::wakeUp));
+    this.lists = new WatchLists(main, log, watch, account, library, contacts, calls, spotify);
+    PowerManager.WakeLock lock = null;
+    try {
+      PowerManager power = app.getSystemService(PowerManager.class);
+      if (power != null) {
+        lock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "watchhelper:answering");
+        lock.setReferenceCounted(false);
+      }
+    } catch (RuntimeException e) {
+      log.add("app", "cannot keep the phone awake while answering the watch: " + e);
+    }
+    this.answering = lock;
     log.add("app", "started, version " + version());
 
     // Only the system can send these broadcasts, so receiving them from outside the app is safe.
@@ -234,6 +262,17 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       watch.setNowPlaying("", "", "", false, -1, 1f, 0);
       watch.setButtonStates(ButtonStates.UNKNOWN, ButtonStates.UNKNOWN, ButtonStates.UNKNOWN);
     }
+    if (lists != null) {
+      lists.onPlayerChanged();
+    }
+    changed();
+  }
+
+  /** Somebody logged in to Spotify's web service, or out of it. */
+  private void onAccountChanged() {
+    if (lists != null) {
+      lists.onAccountChanged();
+    }
     changed();
   }
 
@@ -290,6 +329,27 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       notifications.resend();
       main.postDelayed(calls::onWatchReady, 500);
     }
+  }
+
+  @Override
+  public void onWatchRequest(byte[] message) {
+    if (answering != null) {
+      try {
+        // Lets go by itself after this long, whatever happens.
+        answering.acquire(20_000);
+      } catch (RuntimeException e) {
+        // The request is answered all the same if the phone stays awake by itself.
+      }
+    }
+    int code = message[0] & 0xff;
+    if (code == REQUEST_DISMISS) {
+      if (message.length >= 3) {
+        notifications.dismiss((message[1] & 0xff) | ((message[2] & 0xff) << 8));
+      }
+    } else {
+      lists.onRequest(message);
+    }
+    changed();
   }
 
   @Override
@@ -396,6 +456,12 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         return "hang up";
       case EVENT_OPEN:
         return "music screen opened";
+      case WatchLists.REQUEST_PAGE:
+        return "a page of a list";
+      case WatchLists.REQUEST_ACTION:
+        return "a tap or hold on a list row";
+      case REQUEST_DISMISS:
+        return "clear a notification";
       default:
         return String.format(Locale.ROOT, "code 0x%02x", code);
     }

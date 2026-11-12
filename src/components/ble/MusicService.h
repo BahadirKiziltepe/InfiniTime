@@ -27,6 +27,7 @@
 #undef min
 #include <FreeRTOS.h>
 #include "components/ble/NotificationManager.h"
+#include "components/ble/PhoneLists.h"
 
 namespace Pinetime {
   namespace System {
@@ -45,6 +46,23 @@ namespace Pinetime {
       int OnCommand(struct ble_gatt_access_ctxt* ctxt);
 
       void event(char event);
+
+      // Asks the phone for a page of one of its lists. The answer arrives in Lists().
+      // "parent" is the playlist a list of songs belongs to; it is 0 for the other lists.
+      void RequestList(PhoneLists::Kinds kind, uint8_t token, uint16_t offset, uint16_t parent);
+      // Asks the phone to do something with one row of a list. What the actions mean depends on the list:
+      // a song is added to the queue (ActionTap) or played in its playlist (ActionHold), a playlist is
+      // played (ActionHold), a person is called (ActionTap).
+      void ActOnRow(PhoneLists::Kinds kind, uint8_t action, uint16_t index, uint16_t parent, uint8_t snapshot);
+      // Asks the phone to clear one of its notifications. The phone then takes it back from the watch too.
+      void DismissNotification(uint16_t phoneId);
+
+      static constexpr uint8_t ActionTap = 1;
+      static constexpr uint8_t ActionHold = 2;
+
+      PhoneLists& Lists() {
+        return lists;
+      }
 
       // The phone is gone, and with it everything the watch knew about its call
       void OnDisconnect();
@@ -82,6 +100,14 @@ namespace Pinetime {
       static const char EVENT_CALL_VOLUP = 0x22;
       static const char EVENT_CALL_VOLDOWN = 0x23;
       static const char EVENT_CALL_HANGUP = 0x24;
+      // Longer messages for the Watch Helper phone app. The first byte says what follows:
+      //   0x30 a page of a list, please: list, request number, offset (2 bytes, low byte first), parent (2 bytes)
+      //   0x31 do something with a row: list, action, row number in the list (2 bytes), parent (2 bytes),
+      //        the snapshot number that came with the page
+      //   0x32 clear a notification on the phone: its number (2 bytes)
+      static constexpr uint8_t EVENT_LIST_PAGE = 0x30;
+      static constexpr uint8_t EVENT_LIST_ACTION = 0x31;
+      static constexpr uint8_t EVENT_NOTIFICATION_DISMISS = 0x32;
 
       // What the player's shuffle, repeat and "save this song" buttons currently show, as told
       // by the phone in one three-byte write. Unknown until the phone has sent it.
@@ -121,10 +147,19 @@ namespace Pinetime {
         return phoneBattery;
       }
 
+      // True if the song that is playing was picked by Spotify (Smart Shuffle) and is not part of
+      // the playlist. The phone works that out; see the seventh byte of the buttons characteristic.
+      bool isSmartPick() const {
+        return (trackFlags & TrackSmart) != 0;
+      }
+
       enum MusicStatus { NotPlaying = 0x00, Playing = 0x01 };
 
     private:
+      static constexpr uint8_t TrackSmart = 0x01;
+
       int OnPhoneMessage(struct os_mbuf* om);
+      void Send(const uint8_t* data, uint16_t length);
 
       struct ble_gatt_chr_def characteristicDefinition[16];
       struct ble_gatt_svc_def serviceDefinition[2];
@@ -154,6 +189,7 @@ namespace Pinetime {
       uint8_t phoneVolume {StateUnknown};
       uint8_t phoneVolumeMax {StateUnknown};
       uint8_t phoneBattery {StateUnknown};
+      uint8_t trackFlags {0};
 
       NimbleController& nimble;
       System::SystemTask& systemTask;
@@ -164,6 +200,8 @@ namespace Pinetime {
       size_t pendingLength {0};
       bool pendingActive {false};
       bool pendingAlert {false};
+
+      PhoneLists lists;
     };
   }
 }

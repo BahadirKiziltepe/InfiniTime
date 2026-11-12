@@ -42,6 +42,11 @@ final class Report {
     sb.append("\n== Spotify ==\n");
     sb.append(core.spotify.dump());
 
+    sb.append("\n== Playlists, queue and people ==\n");
+    sb.append(core.account.dump()).append('\n');
+    sb.append(core.library.dump()).append('\n');
+    sb.append(core.lists.dump()).append('\n');
+
     sb.append("\n== What happened ==\n");
     if (core.log.dropped() > 0) {
       sb.append('(').append(core.log.dropped()).append(" older lines left out)\n");

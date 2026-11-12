@@ -52,7 +52,8 @@ namespace {
   constexpr ble_uuid128_t msShuffleCharUuid {CharUuid(0x0c, 0x00)};
   // Not part of stock InfiniTime: the state of the shuffle, repeat and save buttons (three bytes),
   // followed since phone app build 7 by the phone's media volume, its number of volume steps and
-  // the phone's battery in percent.
+  // the phone's battery in percent, and since build 8 by a byte of flags about the song that is
+  // playing (bit 0: Spotify picked it, it is not in the playlist).
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
   // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
   // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is
@@ -65,6 +66,14 @@ namespace {
   //   0x03 take all notifications back
   //   0x10 call: state (0 none, 1 ringing, 2 in a call), then the start of the caller's name
   //   0x11 the rest of the caller's name
+  // Pages of the phone's lists (see PhoneLists) arrive the same way:
+  //   0x20 a page starts: list, request number, offset (2 bytes), total (2 bytes), rows on this page, snapshot
+  //   0x21 a row starts: request number, row (0-3), flags, text
+  //   0x22 more text for a row: request number, row, text
+  //   0x23 the title of the page: request number, text
+  //   0x24 a piece of the sentence shown in place of the rows: request number, text
+  //   0x25 the page is complete: request number
+  //   0x28 what became of something the watch asked for: list, result, text
   constexpr ble_uuid128_t msPhoneCharUuid {CharUuid(0x0e, 0x00)};
   constexpr uint8_t PhoneNotificationBegin {0x01};
   constexpr uint8_t PhoneNotificationRemove {0x02};
@@ -73,6 +82,14 @@ namespace {
   constexpr uint8_t PhoneNotificationEnd {0x05};
   constexpr uint8_t PhoneCall {0x10};
   constexpr uint8_t PhoneCallMore {0x11};
+  constexpr uint8_t PhoneListBegin {0x20};
+  constexpr uint8_t PhoneListRow {0x21};
+  constexpr uint8_t PhoneListRowMore {0x22};
+  constexpr uint8_t PhoneListTitle {0x23};
+  constexpr uint8_t PhoneListNote {0x24};
+  constexpr uint8_t PhoneListEnd {0x25};
+  constexpr uint8_t PhoneListResult {0x28};
+  constexpr size_t PhoneListBeginSize {9};
   constexpr size_t PhoneMessageSize {20};
   constexpr size_t PhoneBeginHeaderSize {7};
 
@@ -144,7 +161,11 @@ Pinetime::Controllers::MusicService::MusicService(Pinetime::Controllers::NimbleC
                                   .access_cb = MusicCallback,
                                   .arg = this,
                                   .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_READ};
-  characteristicDefinition[14] = {.uuid = &msPhoneCharUuid.u, .access_cb = MusicCallback, .arg = this, .flags = BLE_GATT_CHR_F_WRITE};
+  // List pages are written without waiting for an answer to each piece, which is several times quicker
+  characteristicDefinition[14] = {.uuid = &msPhoneCharUuid.u,
+                                  .access_cb = MusicCallback,
+                                  .arg = this,
+                                  .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP};
   characteristicDefinition[15] = {0};
 
   serviceDefinition[0] = {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &msUuid.u, .characteristics = characteristicDefinition};
@@ -236,6 +257,48 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
     case PhoneCallMore:
       notificationManager.AppendCaller(payload, payloadLength);
       break;
+    case PhoneListBegin: {
+      if (length < PhoneListBeginSize || message[1] > static_cast<uint8_t>(PhoneLists::Kinds::Contacts)) {
+        break;
+      }
+      lists.Begin(static_cast<PhoneLists::Kinds>(message[1]),
+                  message[2],
+                  static_cast<uint16_t>(message[3] | (message[4] << 8)),
+                  static_cast<uint16_t>(message[5] | (message[6] << 8)),
+                  message[7],
+                  message[8]);
+      break;
+    }
+    case PhoneListRow:
+      if (length >= 4) {
+        lists.RowText(message[1], message[2], true, message[3], payload + 3, payloadLength - 3);
+      }
+      break;
+    case PhoneListRowMore:
+      if (length >= 3) {
+        lists.RowText(message[1], message[2], false, 0, payload + 2, payloadLength - 2);
+      }
+      break;
+    case PhoneListTitle:
+      if (length >= 2) {
+        lists.Title(message[1], payload + 1, payloadLength - 1);
+      }
+      break;
+    case PhoneListNote:
+      if (length >= 2) {
+        lists.Note(message[1], payload + 1, payloadLength - 1);
+      }
+      break;
+    case PhoneListEnd:
+      if (length >= 2) {
+        lists.End(message[1]);
+      }
+      break;
+    case PhoneListResult:
+      if (length >= 3 && message[1] <= static_cast<uint8_t>(PhoneLists::Kinds::Contacts)) {
+        lists.SetResult(static_cast<PhoneLists::Kinds>(message[1]), message[2], payload + 2, payloadLength - 2);
+      }
+      break;
     default:
       break;
   }
@@ -295,6 +358,7 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
         phoneVolumeMax = static_cast<uint8_t>(s[4]);
         phoneBattery = static_cast<uint8_t>(s[5]);
       }
+      trackFlags = notifSize >= 7 ? static_cast<uint8_t>(s[6]) : 0;
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msPositionCharUuid.u) == 0) {
       trackProgress = (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3];
       trackProgressUpdateTime = xTaskGetTickCount();
@@ -348,10 +412,17 @@ void Pinetime::Controllers::MusicService::OnDisconnect() {
   phoneVolume = StateUnknown;
   phoneVolumeMax = StateUnknown;
   phoneBattery = StateUnknown;
+  trackFlags = 0;
+  lists.Reset();
   notificationManager.SetCall(Pinetime::Controllers::NotificationManager::CallStates::Idle, nullptr, 0);
 }
 
 void Pinetime::Controllers::MusicService::event(char event) {
+  const auto code = static_cast<uint8_t>(event);
+  Send(&code, 1);
+}
+
+void Pinetime::Controllers::MusicService::Send(const uint8_t* data, uint16_t length) {
   uint16_t connectionHandle = nimble.connHandle();
 
   if (connectionHandle == 0 || connectionHandle == BLE_HS_CONN_HANDLE_NONE) {
@@ -361,10 +432,42 @@ void Pinetime::Controllers::MusicService::event(char event) {
   // Allocate the buffer only once we know there is a connection to send it on.
   // Allocating first and returning above leaked one of the 12 buffers of the BLE stack
   // on every event sent while disconnected.
-  auto* om = ble_hs_mbuf_from_flat(&event, 1);
+  auto* om = ble_hs_mbuf_from_flat(data, length);
   if (om == nullptr) {
     return;
   }
 
   ble_gattc_notify_custom(connectionHandle, eventHandle, om);
+}
+
+void Pinetime::Controllers::MusicService::RequestList(PhoneLists::Kinds kind, uint8_t token, uint16_t offset, uint16_t parent) {
+  const uint8_t message[] = {EVENT_LIST_PAGE,
+                             static_cast<uint8_t>(kind),
+                             token,
+                             static_cast<uint8_t>(offset & 0xff),
+                             static_cast<uint8_t>(offset >> 8),
+                             static_cast<uint8_t>(parent & 0xff),
+                             static_cast<uint8_t>(parent >> 8)};
+  Send(message, sizeof(message));
+}
+
+void Pinetime::Controllers::MusicService::ActOnRow(PhoneLists::Kinds kind,
+                                                   uint8_t action,
+                                                   uint16_t index,
+                                                   uint16_t parent,
+                                                   uint8_t snapshot) {
+  const uint8_t message[] = {EVENT_LIST_ACTION,
+                             static_cast<uint8_t>(kind),
+                             action,
+                             static_cast<uint8_t>(index & 0xff),
+                             static_cast<uint8_t>(index >> 8),
+                             static_cast<uint8_t>(parent & 0xff),
+                             static_cast<uint8_t>(parent >> 8),
+                             snapshot};
+  Send(message, sizeof(message));
+}
+
+void Pinetime::Controllers::MusicService::DismissNotification(uint16_t phoneId) {
+  const uint8_t message[] = {EVENT_NOTIFICATION_DISMISS, static_cast<uint8_t>(phoneId & 0xff), static_cast<uint8_t>(phoneId >> 8)};
+  Send(message, sizeof(message));
 }

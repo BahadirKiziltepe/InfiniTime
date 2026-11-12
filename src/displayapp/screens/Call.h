@@ -30,8 +30,8 @@ namespace Pinetime {
        * During the call: a swipe to the left or right turns the volume of the call down or up, and
        * holding the finger down for a second hangs up.
        *
-       * For as long as there is a call, this screen sits between the main screen (swipe down) and the
-       * notifications (swipe up). It closes by itself when the call is over.
+       * For as long as there is a call, this screen sits between the main screen (swipe up) and the
+       * notifications above it (swipe down). It closes by itself when the call is over.
        */
       class Call : public Screen {
       public:

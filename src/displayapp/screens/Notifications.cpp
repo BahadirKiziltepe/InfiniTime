@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "displayapp/InfiniTimeTheme.h"
+#include "components/ble/MusicService.h"
 #include "components/motor/MotorController.h"
 #include "components/settings/Settings.h"
 
@@ -41,6 +42,12 @@ namespace {
   constexpr uint8_t buzzPieceMs = 250;
   constexpr uint8_t buzzLastPieceMs = 200;
 
+  // Keeping the finger down this long clears the notification on the phone
+  constexpr TickType_t holdDuration = pdMS_TO_TICKS(700);
+  constexpr uint8_t clearBuzzMs = 15;
+  // If the phone has not taken the notification back by then, it is shown as before
+  constexpr TickType_t clearTimeout = pdMS_TO_TICKS(4000);
+
   void SetLabelY(void* label, lv_anim_value_t y) {
     lv_obj_set_y(static_cast<lv_obj_t*>(label), static_cast<lv_coord_t>(y));
   }
@@ -69,11 +76,13 @@ namespace {
 Notifications::Notifications(Pinetime::Controllers::NotificationManager& notificationManager,
                              Pinetime::Controllers::MotorController& motorController,
                              Pinetime::Controllers::Settings& settingsController,
+                             Pinetime::Controllers::MusicService& musicService,
                              System::SystemTask& systemTask,
                              Modes mode)
   : notificationManager {notificationManager},
     motorController {motorController},
     settingsController {settingsController},
+    musicService {musicService},
     mode {mode},
     wakeLock(systemTask) {
 
@@ -129,8 +138,8 @@ Notifications::Notifications(Pinetime::Controllers::NotificationManager& notific
   lv_obj_align(labelEmpty, lv_scr_act(), LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_hidden(labelEmpty, true);
 
-  // Tap for the next one, double tap for the one before
-  tapPad.Create(true, 0);
+  // Tap for the next one, double tap for the one before, hold to clear it
+  tapPad.Create(true, holdDuration);
 
   shownTick = xTaskGetTickCount();
   if (mode == Modes::Preview) {
@@ -186,7 +195,26 @@ void Notifications::Refresh() {
     }
   }
 
-  if (count > 1) {
+  if (tap == Widgets::TapPad::Events::Hold && showing && !clearing) {
+    motorController.RunForDuration(clearBuzzMs);
+    if (currentPhoneId != 0) {
+      // Cleared on the phone. The phone then takes it back from the watch, like any other
+      // notification that is cleared there.
+      musicService.DismissNotification(currentPhoneId);
+      clearing = true;
+      clearingTick = now;
+      lv_label_set_text_static(labelCounter, "Clearing...");
+      lv_obj_realign(labelCounter);
+    } else {
+      // A notice from the watch itself
+      notificationManager.Dismiss(currentId);
+    }
+  } else if (clearing && (now - clearingTick) >= clearTimeout) {
+    // The phone did not clear it (it may be one that cannot be cleared)
+    Show();
+  }
+
+  if (count > 1 && !clearing) {
     if (tap == Widgets::TapPad::Events::Tap) {
       index = (index + 1) % count;
       Show();
@@ -231,6 +259,7 @@ void Notifications::Reload() {
 }
 
 void Notifications::Show() {
+  clearing = false;
   const auto notification = notificationManager.GetAt(index);
   const bool empty = count == 0 || !notification.valid || notification.size == 0;
 
@@ -334,19 +363,21 @@ void Notifications::ScrollTo(lv_coord_t offset, bool animate) {
 bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
   switch (event) {
     case TouchEvents::SwipeUp:
-      // Read on. With nothing further down, the swipe does nothing.
+      // Read on
       if (scrollOffset < scrollMax) {
         const lv_coord_t next = scrollOffset + scrollStep;
         ScrollTo(next < scrollMax ? next : scrollMax, true);
+        return true;
       }
-      return true;
+      // Already at the end: the swipe leads back down to the main screen
+      return false;
     case TouchEvents::SwipeDown:
       if (scrollOffset > 0) {
         const lv_coord_t previous = scrollOffset - scrollStep;
         ScrollTo(previous > 0 ? previous : 0, true);
         return true;
       }
-      // Already at the top: the swipe leaves the screen
+      // Already at the top: the swipe leads on up to the settings
       return false;
     default:
       return false;

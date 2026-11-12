@@ -528,7 +528,7 @@ final class SpotifyWatcher {
   /** A few lines for the screen. */
   String describe() {
     if (accessDenied) {
-      return "Waiting for step 1.";
+      return "Waiting for notification access.";
     }
     if (controller == null) {
       return "✗ Spotify is not playing anything.\nOpen Spotify and start a song.";
@@ -636,6 +636,15 @@ final class SpotifyWatcher {
     } catch (RuntimeException e) {
       log.add("control", "play/pause failed: " + e);
     }
+  }
+
+  /**
+   * Starts Spotify when it is not running, the way a headset's play button does. Android hands
+   * that button to the app that played last.
+   */
+  void wakeUp() {
+    log.add("control", "starting Spotify with a headset play button");
+    mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY);
   }
 
   void next(String from) {

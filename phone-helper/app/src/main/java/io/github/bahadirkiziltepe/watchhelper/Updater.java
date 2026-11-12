@@ -349,7 +349,7 @@ final class Updater {
       return;
     }
     if (watch.addressForUpdate() == null) {
-      setStatus("✗ The watch is not linked. Do step 3 first.");
+      setStatus("✗ The watch is not linked. Wait until it is connected.");
       return;
     }
     if (stuck) {

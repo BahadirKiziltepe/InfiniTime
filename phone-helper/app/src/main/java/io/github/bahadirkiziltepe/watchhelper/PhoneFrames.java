@@ -40,6 +40,47 @@ final class PhoneFrames {
   private static final int CALL = 0x10;
   private static final int CALL_MORE = 0x11;
 
+  // Lists the watch asks for, one page at a time (see src/components/ble/PhoneLists.h).
+  static final int LIST_QUEUE = 1;
+  static final int LIST_PLAYLISTS = 2;
+  static final int LIST_SONGS = 3;
+  static final int LIST_CONTACTS = 4;
+  /** How many rows the watch shows at once, and so how many a page holds. */
+  static final int ROWS_PER_PAGE = 4;
+  static final int MAX_ROW = 33;
+  static final int MAX_LIST_TITLE = 17;
+  static final int MAX_NOTE = 72;
+  static final int MAX_RESULT = 17;
+  /** A song Spotify picked itself: it is not in the playlist that is playing. */
+  static final int ROW_SMART = 0x01;
+  /** The song that is playing. */
+  static final int ROW_PLAYING = 0x02;
+  /** A playlist whose songs cannot be listed. */
+  static final int ROW_CLOSED = 0x04;
+  static final int RESULT_DONE = 0;
+  static final int RESULT_FAILED = 1;
+  /** The list is no longer the one the watch's page came from. The watch asks for the page again. */
+  static final int RESULT_STALE = 2;
+
+  private static final int LIST_BEGIN = 0x20;
+  private static final int LIST_ROW = 0x21;
+  private static final int LIST_ROW_MORE = 0x22;
+  private static final int LIST_TITLE = 0x23;
+  private static final int LIST_NOTE = 0x24;
+  private static final int LIST_END = 0x25;
+  private static final int LIST_RESULT = 0x28;
+
+  /** One row of a list page. */
+  static final class Row {
+    final String text;
+    final int flags;
+
+    Row(String text, int flags) {
+      this.text = text;
+      this.flags = flags;
+    }
+  }
+
   private PhoneFrames() {
   }
 
@@ -148,6 +189,65 @@ final class PhoneFrames {
     System.arraycopy(name, 0, head, 2, first);
     out.add(head);
     addPieces(out, CALL_MORE, name, first);
+    return out;
+  }
+
+  /**
+   * A page of a list, in answer to the watch's request number {@code token}. {@code offset} is the
+   * place of the first row in the whole list and {@code total} the length of that list.
+   * {@code snapshot} names the list the page was cut from; the watch sends it back when it asks for
+   * something to be done with a row. {@code title} may be empty. {@code note} is a sentence the
+   * watch shows when there are no rows.
+   */
+  static List<byte[]> listPage(int kind, int token, int offset, int total, int snapshot, String title, String note,
+      List<Row> rows) {
+    int count = Math.min(rows == null ? 0 : rows.size(), ROWS_PER_PAGE);
+    List<byte[]> out = new ArrayList<>();
+    out.add(new byte[] {(byte) LIST_BEGIN, (byte) kind, (byte) token, (byte) offset, (byte) (offset >> 8),
+        (byte) total, (byte) (total >> 8), (byte) count, (byte) snapshot});
+
+    byte[] titleBytes = WatchText.encode(title == null ? "" : title, MAX_LIST_TITLE);
+    if (titleBytes.length > 0) {
+      out.add(piece(new byte[] {(byte) LIST_TITLE, (byte) token}, titleBytes, 0, titleBytes.length));
+    }
+    for (int slot = 0; slot < count; slot++) {
+      Row row = rows.get(slot);
+      byte[] text = WatchText.encode(row.text == null ? "" : row.text, MAX_ROW);
+      int first = Math.min(text.length, MAX_MESSAGE - 4);
+      out.add(piece(new byte[] {(byte) LIST_ROW, (byte) token, (byte) slot, (byte) row.flags}, text, 0, first));
+      for (int at = first; at < text.length;) {
+        int size = Math.min(MAX_MESSAGE - 3, text.length - at);
+        out.add(piece(new byte[] {(byte) LIST_ROW_MORE, (byte) token, (byte) slot}, text, at, size));
+        at += size;
+      }
+    }
+    byte[] noteBytes = WatchText.encode(note == null ? "" : note, MAX_NOTE);
+    for (int at = 0; at < noteBytes.length;) {
+      int size = Math.min(MAX_MESSAGE - 2, noteBytes.length - at);
+      out.add(piece(new byte[] {(byte) LIST_NOTE, (byte) token}, noteBytes, at, size));
+      at += size;
+    }
+    out.add(new byte[] {(byte) LIST_END, (byte) token});
+    return out;
+  }
+
+  /** What became of something the watch asked for: one of the RESULT_ values and a few words. */
+  static List<byte[]> listResult(int kind, int result, String text) {
+    byte[] words = WatchText.encode(text == null ? "" : text, MAX_RESULT);
+    List<byte[]> out = new ArrayList<>();
+    out.add(piece(new byte[] {(byte) LIST_RESULT, (byte) kind, (byte) result}, words, 0, words.length));
+    return out;
+  }
+
+  /** True for the messages that make up a list page. They may be sent without waiting for an answer to each. */
+  static boolean isListMessage(byte[] message) {
+    return message != null && message.length > 0 && (message[0] & 0xf0) == 0x20;
+  }
+
+  private static byte[] piece(byte[] head, byte[] data, int from, int size) {
+    byte[] out = new byte[head.length + size];
+    System.arraycopy(head, 0, out, 0, head.length);
+    System.arraycopy(data, from, out, head.length, size);
     return out;
   }
 

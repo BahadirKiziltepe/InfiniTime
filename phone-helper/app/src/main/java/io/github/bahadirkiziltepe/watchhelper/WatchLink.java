@@ -56,6 +56,12 @@ final class WatchLink {
 
     void onWatchEvent(int code);
 
+    /**
+     * A longer message from the watch (watch build 8 and newer): a page of a list is wanted, something
+     * is to be done with a row of one, or a notification is to be cleared. The first byte says which.
+     */
+    void onWatchRequest(byte[] message);
+
     /** Messages about notifications or calls were lost on the way. What the watch shows may be incomplete. */
     void onPhoneMessagesLost();
   }
@@ -157,6 +163,7 @@ final class WatchLink {
   private int levelVolume = UNKNOWN_BYTE;
   private int levelVolumeSteps = UNKNOWN_BYTE;
   private int levelBattery = UNKNOWN_BYTE;
+  private int trackFlags;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -257,7 +264,7 @@ final class WatchLink {
       return;
     }
     if (!hasConnectPermission()) {
-      setPhase("Waiting for step 2.");
+      setPhase("Waiting for the Nearby devices permission.");
       return;
     }
     if (!bluetoothOn()) {
@@ -280,7 +287,7 @@ final class WatchLink {
   /** Looks for the watch: first among devices this phone is already connected to, then nearby. */
   void findWatch() {
     if (!hasConnectPermission() || !hasScanPermission()) {
-      setPhase("Waiting for step 2.");
+      setPhase("Waiting for the Nearby devices permission.");
       return;
     }
     if (!bluetoothOn()) {
@@ -751,7 +758,11 @@ final class WatchLink {
       eventsHeard++;
       int code = value[0] & 0xff;
       lastEvent = Core.eventName(code);
-      listener.onWatchEvent(code);
+      if (code >= Core.REQUEST_FIRST && code <= Core.REQUEST_LAST) {
+        listener.onWatchRequest(value.clone());
+      } else {
+        listener.onWatchEvent(code);
+      }
     }
 
     @Override
@@ -861,10 +872,21 @@ final class WatchLink {
     putPhoneState();
   }
 
-  /** The button states and the levels travel together, in the channel the button states had first. */
+  /**
+   * Tells the watch about the song that is playing (watch build 8 and newer; older builds ignore it).
+   * Bit 0: Spotify picked the song itself, it is not in the playlist that is playing.
+   */
+  void setTrackFlags(int flags) {
+    if (flags != trackFlags) {
+      trackFlags = flags;
+      putPhoneState();
+    }
+  }
+
+  /** The button states, the levels and the song's flags travel together, in the channel the button states had first. */
   private void putPhoneState() {
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
-        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery});
+        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) trackFlags});
     pump();
   }
 
@@ -964,7 +986,10 @@ final class WatchLink {
       byte[] message = phoneQueue.peek();
       int rc;
       try {
-        rc = g.writeCharacteristic(phone, message, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        // The pieces of a list page are sent without waiting for the watch to answer each one, which
+        // makes a page several times quicker. Bluetooth still delivers them in order and complete.
+        rc = g.writeCharacteristic(phone, message, PhoneFrames.isListMessage(message)
+            ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
       } catch (RuntimeException e) {
         rc = -1;
       }
@@ -1151,6 +1176,11 @@ final class WatchLink {
   /** The connection's current message size (23 unless another app on the same connection raised it). */
   int messageSize() {
     return mtu;
+  }
+
+  /** One line: where the link to the watch stands. */
+  String phase() {
+    return phase;
   }
 
   /** A few lines for the screen. */

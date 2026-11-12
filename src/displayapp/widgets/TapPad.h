@@ -56,6 +56,16 @@ namespace Pinetime {
           return fingerDown || tapWaiting;
         }
 
+        /** A finger is down and has not moved away: this press can still become a tap or a hold */
+        bool Pressing() const {
+          return fingerDown && !pressSpent;
+        }
+
+        /** Where the finger came down for the tap or hold that was last reported, or is under way */
+        lv_point_t PressPoint() const {
+          return pressPoint;
+        }
+
         /** True once after the screen was touched (muted touches do not count) */
         bool TakeTouched() {
           const bool result = touched;

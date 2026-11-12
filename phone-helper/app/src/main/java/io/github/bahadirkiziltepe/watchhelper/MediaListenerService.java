@@ -54,6 +54,54 @@ public class MediaListenerService extends NotificationListenerService {
     }
   }
 
+  /**
+   * Clears a notification on the phone, as swiping it away would. Returns false if Android could
+   * not be asked. Whether it really went is seen when Android reports it removed.
+   */
+  static boolean dismiss(String key) {
+    MediaListenerService service = active;
+    if (service == null || key == null) {
+      return false;
+    }
+    try {
+      StatusBarNotification[] all = service.getActiveNotifications();
+      StatusBarNotification target = null;
+      for (int i = 0; all != null && i < all.length; i++) {
+        if (all[i] != null && key.equals(all[i].getKey())) {
+          target = all[i];
+        }
+      }
+      service.cancelNotification(key);
+      if (target == null) {
+        return true;
+      }
+      // An app's notifications hang under a summary. When the last of them goes, the summary would
+      // stay behind as an empty shell, so it goes too.
+      String group = target.getGroupKey();
+      boolean othersLeft = false;
+      java.util.List<String> summaries = new java.util.ArrayList<>();
+      for (StatusBarNotification other : all) {
+        if (other == null || other == target || group == null || !group.equals(other.getGroupKey())) {
+          continue;
+        }
+        if (other.getNotification() != null
+            && (other.getNotification().flags & android.app.Notification.FLAG_GROUP_SUMMARY) != 0) {
+          summaries.add(other.getKey());
+        } else {
+          othersLeft = true;
+        }
+      }
+      if (!othersLeft) {
+        for (String summary : summaries) {
+          service.cancelNotification(summary);
+        }
+      }
+      return true;
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
   static RankingMap ranking() {
     MediaListenerService service = active;
     if (service == null) {
