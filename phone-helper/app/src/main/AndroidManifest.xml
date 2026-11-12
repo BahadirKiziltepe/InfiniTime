@@ -48,6 +48,8 @@
         <package android:name="com.spotify.music" />
         <!-- Warn when Gadgetbridge is still around: two apps would act on the same watch buttons. -->
         <package android:name="nodomain.freeyourgadget.gadgetbridge" />
+        <!-- Read the small icon of Claude's notifications, which the watch shows next to its battery numbers. -->
+        <package android:name="com.anthropic.claude" />
     </queries>
 
     <application

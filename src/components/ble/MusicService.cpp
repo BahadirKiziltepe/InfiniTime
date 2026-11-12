@@ -76,6 +76,11 @@ namespace {
   //   0x24 a piece of the sentence shown in place of the rows: request number, text
   //   0x25 the page is complete: request number
   //   0x28 what became of something the watch asked for: list, result, text
+  // And the picture for the mark on the main screen (the small icon of the app the mark stands for):
+  //   0x2a a picture starts: its width and height in pixels (one number), then red, green and blue
+  //        of the colour to draw it in (all three 0: the watch's own orange)
+  //   0x2b a piece of it: where it goes (2 bytes), then the bytes, two pixels in each
+  //   0x2c the picture is complete: the sum of all its bytes, to be sure
   constexpr ble_uuid128_t msPhoneCharUuid {CharUuid(0x0e, 0x00)};
   constexpr uint8_t PhoneNotificationBegin {0x01};
   constexpr uint8_t PhoneNotificationRemove {0x02};
@@ -92,6 +97,9 @@ namespace {
   constexpr uint8_t PhoneListNote {0x24};
   constexpr uint8_t PhoneListEnd {0x25};
   constexpr uint8_t PhoneListResult {0x28};
+  constexpr uint8_t PhoneIconBegin {0x2a};
+  constexpr uint8_t PhoneIconData {0x2b};
+  constexpr uint8_t PhoneIconEnd {0x2c};
   constexpr size_t PhoneListBeginSize {9};
   constexpr size_t PhoneMessageSize {20};
   constexpr size_t PhoneBeginHeaderSize {7};
@@ -305,6 +313,56 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
         lists.SetResult(static_cast<PhoneLists::Kinds>(message[1]), message[2], payload + 2, payloadLength - 2);
       }
       break;
+    case PhoneIconBegin:
+      incomingIconActive = length >= 5 && message[1] == MarkIconSize;
+      incomingIconFilled = 0;
+      if (incomingIconActive) {
+        incomingIconColor = {message[2], message[3], message[4]};
+      }
+      break;
+    case PhoneIconData: {
+      if (!incomingIconActive || length < 4) {
+        break;
+      }
+      const size_t offset = static_cast<size_t>(message[1] | (message[2] << 8));
+      const size_t count = length - 3;
+      // The pieces come in order. Anything else means one went missing: wait for the picture to be sent again.
+      if (offset != incomingIconFilled || offset + count > MarkIconPixelBytes) {
+        incomingIconActive = false;
+        break;
+      }
+      std::memcpy(incomingIcon.data() + offset, &message[3], count);
+      incomingIconFilled += count;
+      break;
+    }
+    case PhoneIconEnd: {
+      if (!incomingIconActive || length < 2 || incomingIconFilled != MarkIconPixelBytes) {
+        incomingIconActive = false;
+        break;
+      }
+      incomingIconActive = false;
+      uint8_t sum = 0;
+      for (const uint8_t byte : incomingIcon) {
+        sum = static_cast<uint8_t>(sum + byte);
+      }
+      if (sum != message[1]) {
+        break;
+      }
+      // No colour given: the orange the watch uses for its own marks
+      const bool ownColor = incomingIconColor[0] == 0 && incomingIconColor[1] == 0 && incomingIconColor[2] == 0;
+      const uint8_t red = ownColor ? 0xff : incomingIconColor[0];
+      const uint8_t green = ownColor ? 0xb0 : incomingIconColor[1];
+      const uint8_t blue = ownColor ? 0x00 : incomingIconColor[2];
+      for (size_t strength = 0; strength < 16; strength++) {
+        markIcon[strength * 4] = blue;
+        markIcon[strength * 4 + 1] = green;
+        markIcon[strength * 4 + 2] = red;
+        markIcon[strength * 4 + 3] = static_cast<uint8_t>(strength * 17);
+      }
+      std::memcpy(markIcon.data() + MarkIconPaletteBytes, incomingIcon.data(), MarkIconPixelBytes);
+      markIconRevision++;
+      break;
+    }
     default:
       break;
   }

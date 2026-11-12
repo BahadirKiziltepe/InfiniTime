@@ -76,6 +76,8 @@ namespace Pinetime {
         lv_obj_t* labelBattery;
         lv_obj_t* notificationIcon;
         lv_obj_t* waitingDot;
+        lv_obj_t* waitingIcon;
+        lv_img_dsc_t waitingIconImage {};
         lv_obj_t* labelVolume;
         lv_obj_t* labelTrack;
         lv_obj_t* labelArtist;
@@ -125,6 +127,7 @@ namespace Pinetime {
         uint8_t shownPhoneBattery = 0xfe;
         uint8_t shownVolume = 0xfe;
         bool shownWaiting = false;
+        uint32_t shownIconRevision = 0;
 
         /** Touch pad: a finger is down on it, and whether this press can still become a tap or a hold */
         bool fingerDown = false;

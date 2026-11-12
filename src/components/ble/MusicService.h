@@ -17,6 +17,9 @@
 */
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #define min // workaround: nimble's min/max macros conflict with libstdc++
@@ -160,6 +163,28 @@ namespace Pinetime {
         return (trackFlags & WaitingMark) != 0;
       }
 
+      // The picture for that mark, if the phone has sent one: the small icon the app puts on its
+      // own notifications, as the phone read it there. It is never stored in the watch's firmware.
+      // The data is laid out the way LVGL wants an "indexed, 4 bit" image: sixteen colours (the
+      // icon's colour at sixteen strengths), then one row after the other, two pixels per byte.
+      static constexpr uint8_t MarkIconSize = 20;
+      static constexpr size_t MarkIconPaletteBytes = 16 * 4;
+      static constexpr size_t MarkIconPixelBytes = MarkIconSize * (MarkIconSize / 2);
+      static constexpr size_t MarkIconBytes = MarkIconPaletteBytes + MarkIconPixelBytes;
+
+      bool hasMarkIcon() const {
+        return markIconRevision != 0;
+      }
+
+      const uint8_t* markIconData() const {
+        return markIcon.data();
+      }
+
+      // Goes up whenever a picture has arrived, so the screen knows to draw it again
+      uint32_t getMarkIconRevision() const {
+        return markIconRevision;
+      }
+
       enum MusicStatus { NotPlaying = 0x00, Playing = 0x01 };
 
     private:
@@ -210,6 +235,14 @@ namespace Pinetime {
       bool pendingAlert {false};
 
       PhoneLists lists;
+
+      // The mark's picture as it is shown, and the one that is arriving in pieces
+      std::array<uint8_t, MarkIconBytes> markIcon {};
+      std::atomic<uint32_t> markIconRevision {0};
+      std::array<uint8_t, MarkIconPixelBytes> incomingIcon {};
+      std::array<uint8_t, 3> incomingIconColor {};
+      size_t incomingIconFilled {0};
+      bool incomingIconActive {false};
     };
   }
 }

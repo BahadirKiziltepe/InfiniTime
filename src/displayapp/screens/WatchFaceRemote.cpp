@@ -141,9 +141,13 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   lv_label_set_text_static(labelBattery, "");
   lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, 0, 0);
 
-  // An orange dot left of the battery numbers says that Claude has a notification waiting on the
-  // phone. Only that it is there: what it says never comes to the watch, and it is not among the
-  // notifications either.
+  // A mark left of the battery numbers says that Claude has a notification waiting on the phone.
+  // Only that it is there: what it says never comes to the watch, and it is not among the
+  // notifications either. The mark is the small icon the app puts on its own notifications, if the
+  // phone has passed it on (see MusicService), and an orange dot until then.
+  waitingIcon = lv_img_create(lv_scr_act(), nullptr);
+  lv_obj_set_hidden(waitingIcon, true);
+
   waitingDot = lv_obj_create(lv_scr_act(), nullptr);
   lv_obj_set_size(waitingDot, waitingDotSize, waitingDotSize);
   lv_obj_set_style_local_radius(waitingDot, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_RADIUS_CIRCLE);
@@ -318,11 +322,27 @@ void WatchFaceRemote::UpdateLevels() {
     batteryMoved = true;
   }
 
-  // The dot sits right next to the numbers, so it moves when they get wider or narrower
+  // The mark sits right next to the numbers, so it moves when they get wider or narrower
   const bool waiting = connected && musicService.hasWaitingMark();
-  if (waiting != shownWaiting || (waiting && batteryMoved)) {
+  const uint32_t iconRevision = musicService.getMarkIconRevision();
+  if (waiting != shownWaiting || iconRevision != shownIconRevision || (waiting && batteryMoved)) {
+    if (iconRevision != shownIconRevision) {
+      // A picture has arrived from the phone, or a newer one in place of the one before
+      shownIconRevision = iconRevision;
+      waitingIconImage.header.always_zero = 0;
+      waitingIconImage.header.cf = LV_IMG_CF_INDEXED_4BIT;
+      waitingIconImage.header.w = Music::MarkIconSize;
+      waitingIconImage.header.h = Music::MarkIconSize;
+      waitingIconImage.data_size = Music::MarkIconBytes;
+      waitingIconImage.data = musicService.markIconData();
+      lv_img_cache_invalidate_src(&waitingIconImage);
+      lv_img_set_src(waitingIcon, &waitingIconImage);
+    }
     shownWaiting = waiting;
-    lv_obj_set_hidden(waitingDot, !waiting);
+    const bool picture = musicService.hasMarkIcon();
+    lv_obj_set_hidden(waitingIcon, !(waiting && picture));
+    lv_obj_set_hidden(waitingDot, !(waiting && !picture));
+    lv_obj_align(waitingIcon, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
     lv_obj_align(waitingDot, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
   }
 

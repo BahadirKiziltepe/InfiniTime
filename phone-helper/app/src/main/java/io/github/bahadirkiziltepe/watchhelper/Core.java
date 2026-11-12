@@ -97,6 +97,13 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   private static final long CLAUDE_BUZZ_GAP_MS = 3_000;
   private static final long CLAUDE_TEST_MS = 20_000;
   private long claudeBuzzAt = -CLAUDE_BUZZ_GAP_MS;
+  /**
+   * The small icon of Claude's notifications as the watch shows it, and its colour. Read from a
+   * notification when one is up, and kept so a watch that links later can have it right away.
+   */
+  private byte[] claudeIcon;
+  private int claudeIconColor;
+  private static final String MARKS = "marks";
   private int claudeBuzzes;
   private boolean claudeTesting;
 
@@ -125,6 +132,17 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       log.add("app", "cannot keep the phone awake while answering the watch: " + e);
     }
     this.answering = lock;
+    try {
+      android.content.SharedPreferences marks = app.getSharedPreferences(MARKS, Context.MODE_PRIVATE);
+      String saved = marks.getString("claude_icon", null);
+      byte[] icon = saved == null ? null : android.util.Base64.decode(saved, android.util.Base64.NO_WRAP);
+      if (icon != null && icon.length == MarkIcon.SIZE * (MarkIcon.SIZE / 2)) {
+        claudeIcon = icon;
+        claudeIconColor = marks.getInt("claude_color", 0);
+      }
+    } catch (RuntimeException e) {
+      // The watch shows its dot until a notification brings the icon again.
+    }
     log.add("app", "started, version " + version());
 
     // Only the system can send these broadcasts, so receiving them from outside the app is safe.
@@ -215,6 +233,9 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     }
     boolean before = !claudeWaiting.isEmpty();
     boolean fresh = false;
+    if (posted) {
+      noteClaudeIcon(sbn);
+    }
     // One that cannot be swiped away is the app saying that it is busy, not that it has something to say.
     if (posted && !sbn.isOngoing()) {
       boolean known = !claudeWaiting.add(sbn.getKey());
@@ -235,6 +256,40 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       buzzForClaude();
     }
     changed();
+  }
+
+  /** Picks up the icon Claude puts on its notification, and passes it to the watch if it is new. */
+  private void noteClaudeIcon(StatusBarNotification sbn) {
+    byte[] icon = MarkIcon.render(app, sbn);
+    if (icon == null) {
+      return;
+    }
+    int color = MarkIcon.color(sbn);
+    if (java.util.Arrays.equals(icon, claudeIcon) && color == claudeIconColor) {
+      return;
+    }
+    claudeIcon = icon;
+    claudeIconColor = color;
+    try {
+      app.getSharedPreferences(MARKS, Context.MODE_PRIVATE).edit()
+          .putString("claude_icon", android.util.Base64.encodeToString(icon, android.util.Base64.NO_WRAP))
+          .putInt("claude_color", color).apply();
+    } catch (RuntimeException e) {
+      // It is read again from the next notification.
+    }
+    log.add("notify", "Claude: read the icon of its notification for the watch");
+    sendClaudeIcon();
+  }
+
+  private void sendClaudeIcon() {
+    if (claudeIcon != null && watch != null && watch.hasPhoneChannel()) {
+      watch.sendPhone(PhoneFrames.markIcon(claudeIcon, claudeIconColor));
+    }
+  }
+
+  /** Whether the watch can show Claude's own icon, or only its dot. For the screen and the report. */
+  boolean claudeIconKnown() {
+    return claudeIcon != null;
   }
 
   /** Makes the watch buzz, as it does for a notification, without showing one. */
@@ -274,9 +329,10 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       return "✓ Claude: test under way. The watch should have buzzed and shows the dot for 20 seconds.";
     }
     int count = claudeWaiting.size();
-    return count == 0 ? "✓ Claude: no notification from Claude on the phone right now."
+    String mark = claudeIcon != null ? "Claude's icon" : "an orange dot (the icon comes with Claude's next notification)";
+    return count == 0 ? "✓ Claude: no notification from Claude on the phone right now. The watch will show " + mark + "."
         : "✓ Claude: " + count + (count == 1 ? " notification is" : " notifications are")
-            + " waiting on the phone. The watch shows the dot.";
+            + " waiting on the phone. The watch shows " + mark + ".";
   }
 
   /** How often the watch was told to buzz for Claude, for the report. */
@@ -421,6 +477,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       // A watch that has just linked may have restarted and forgotten everything.
       calls.onWatchReady();
       notifications.onWatchReady();
+      sendClaudeIcon();
     }
     watchWasReady = ready;
     changed();

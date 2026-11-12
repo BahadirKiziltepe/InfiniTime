@@ -70,6 +70,12 @@ final class PhoneFrames {
   private static final int LIST_NOTE = 0x24;
   private static final int LIST_END = 0x25;
   private static final int LIST_RESULT = 0x28;
+  // The picture for the mark on the watch's main screen. These go the quick way too.
+  private static final int ICON_BEGIN = 0x2a;
+  private static final int ICON_DATA = 0x2b;
+  private static final int ICON_END = 0x2c;
+  /** Width and height of that picture in pixels. Each pixel takes half a byte. */
+  static final int MARK_ICON_SIZE = 20;
 
   /** One row of a list page. */
   static final class Row {
@@ -247,6 +253,27 @@ final class PhoneFrames {
     byte[] words = WatchText.encode(text == null ? "" : text, MAX_RESULT);
     List<byte[]> out = new ArrayList<>();
     out.add(piece(new byte[] {(byte) LIST_RESULT, (byte) kind, (byte) result}, words, 0, words.length));
+    return out;
+  }
+
+  /**
+   * The picture for the mark on the watch's main screen (watch build 14 and newer; older builds
+   * ignore it): MARK_ICON_SIZE rows of as many pixels, two to a byte, each 0 to 15. {@code rgb} is
+   * the colour to show it in as 0xRRGGBB, or 0 for the watch's own orange.
+   */
+  static List<byte[]> markIcon(byte[] pixels, int rgb) {
+    List<byte[]> out = new ArrayList<>();
+    out.add(new byte[] {(byte) ICON_BEGIN, (byte) MARK_ICON_SIZE, (byte) (rgb >> 16), (byte) (rgb >> 8), (byte) rgb});
+    int sum = 0;
+    for (int at = 0; at < pixels.length;) {
+      int size = Math.min(MAX_MESSAGE - 3, pixels.length - at);
+      out.add(piece(new byte[] {(byte) ICON_DATA, (byte) at, (byte) (at >> 8)}, pixels, at, size));
+      at += size;
+    }
+    for (byte b : pixels) {
+      sum += b & 0xff;
+    }
+    out.add(new byte[] {(byte) ICON_END, (byte) sum});
     return out;
   }
 
