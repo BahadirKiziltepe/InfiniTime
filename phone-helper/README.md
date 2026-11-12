@@ -8,7 +8,8 @@ The Android companion for the watch firmware in this repository. It is deliberat
 - passes notifications from Google Messages, WhatsApp and Discord on to the watch, and takes
   them off the watch again when they go away on the phone
 - tells the watch when the phone rings or is in a call, and answers or declines a ringing
-  call when the watch asks for it
+  call when the watch asks for it (calls made through apps such as WhatsApp need nothing
+  extra; ordinary phone calls need the Phone, Call logs and Contacts permissions)
 - installs watch builds from this repository's Releases page ("Update watch")
 - shows what Spotify offers to other apps and produces a report, used to wire up the
   watch's shuffle / repeat / add buttons

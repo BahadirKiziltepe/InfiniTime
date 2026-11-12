@@ -13,9 +13,16 @@
     <!-- Ask Android not to put the app to sleep, so the watch stays connected. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- Answer or decline a ringing call when the watch asks for it. Asked for on the app's screen;
-         without it the app presses the buttons on the call notification instead. -->
+    <!-- Ordinary phone calls. All four are asked for on the app's screen, and calls made through
+         apps such as WhatsApp work without any of them.
+         Phone state: to know that the phone is ringing or in a call.
+         Answer calls: to answer or hang up when the watch asks for it.
+         Call log: Android only gives the number that is calling to apps allowed to see call logs.
+         Contacts: to show the caller's name instead of the number. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!-- Turn the volume of a call up or down from the watch. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

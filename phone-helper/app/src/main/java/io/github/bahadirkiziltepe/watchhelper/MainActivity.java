@@ -137,8 +137,12 @@ public class MainActivity extends Activity {
     root.addView(heading("Notifications and calls"));
     phoneStatus = body("");
     root.addView(phoneStatus);
-    phoneButton = button("Allow Phone", v -> requestPermissions(
-        new String[] {Manifest.permission.ANSWER_PHONE_CALLS}, REQUEST_PHONE));
+    phoneButton = button("Allow calls", v -> {
+      String[] missing = core.calls.missingPermissions();
+      if (missing.length > 0) {
+        requestPermissions(missing, REQUEST_PHONE);
+      }
+    });
     root.addView(row(button("Test notification", v -> core.notifications.sendTest()), phoneButton));
 
     root.addView(heading("Update watch"));
@@ -263,7 +267,7 @@ public class MainActivity extends Activity {
     backgroundButtons.setVisibility(background ? View.GONE : View.VISIBLE);
 
     phoneStatus.setText(core.notifications.describe() + "\n" + core.calls.describe());
-    phoneButton.setVisibility(core.calls.hasPhonePermission() ? View.GONE : View.VISIBLE);
+    phoneButton.setVisibility(core.calls.missingPermissions().length == 0 ? View.GONE : View.VISIBLE);
 
     renderUpdater();
 

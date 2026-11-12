@@ -6,19 +6,29 @@ import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.Person;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.provider.ContactsContract;
 import android.service.notification.StatusBarNotification;
 import android.telecom.TelecomManager;
+import android.telephony.TelephonyCallback;
+import android.telephony.TelephonyManager;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -27,11 +37,17 @@ import java.util.Set;
  * Tells the watch when the phone rings or is in a call, and answers or declines a ringing call
  * when the watch asks for it.
  *
- * <p>It learns about calls in two ways that need no extra permission: the phone app (and WhatsApp
- * and the like) put up a call notification with the caller's name and Answer and Decline buttons,
- * and Android says whether the phone is ringing or in a call. To answer or decline it presses the
- * notification's own button. For ordinary phone calls it can also ask Android directly, which
- * needs the Phone permission; that is tried first when it has been allowed.
+ * <p>Calls made through apps (WhatsApp and the like) show up as a call notification with the
+ * caller's name and Answer and Decline buttons, and that is all it takes: the app presses the
+ * notification's own button.
+ *
+ * <p>Ordinary phone calls are different. On the phone this was written for (a Samsung Galaxy on
+ * Android 17, going by its report of 12 November 2026), nothing an app could see without the Phone
+ * permission said that the phone was ringing: no call notification appeared until the call had
+ * been answered, and the sound mode did not change the way it does for a WhatsApp call. So for
+ * those the app asks Android itself: the Phone permission tells it that the phone rings and lets it answer or
+ * hang up, Call logs gives it the number that is calling, and Contacts turns that number into a
+ * name.
  *
  * <p>The caller's name goes to the watch and nowhere else. It is never written to the log or the
  * report.
@@ -79,6 +95,43 @@ final class CallWatcher {
   /** Call notifications showing right now, by Android's key for each. */
   private final Map<String, CallNote> notes = new LinkedHashMap<>();
   private boolean started;
+
+  // Ordinary phone calls, as Android reports them once the Phone permission is there.
+  private final TelephonyManager telephony;
+  private boolean telephonyListening;
+  private int phoneState = TelephonyManager.CALL_STATE_IDLE;
+  /** Who the ordinary phone call is with: a contact's name, or the number. Never logged. */
+  private String phoneCaller = "";
+  private boolean phoneNumberSeen;
+  private String lastPhoneAppShape = "";
+
+  private final TelephonyCallback phoneCallback = new PhoneCallback();
+
+  private final class PhoneCallback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
+    @Override
+    public void onCallStateChanged(int state) {
+      onPhoneState(state, null);
+    }
+  }
+
+  /** Android also announces the phone's state to apps, and that announcement carries the number. */
+  private final BroadcastReceiver phoneReceiver = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+      if (intent == null || !TelephonyManager.ACTION_PHONE_STATE_CHANGED.equals(intent.getAction())) {
+        return;
+      }
+      String state = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
+      String number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER);
+      if (TelephonyManager.EXTRA_STATE_RINGING.equals(state)) {
+        onPhoneState(TelephonyManager.CALL_STATE_RINGING, number);
+      } else if (TelephonyManager.EXTRA_STATE_OFFHOOK.equals(state)) {
+        onPhoneState(TelephonyManager.CALL_STATE_OFFHOOK, number);
+      } else if (TelephonyManager.EXTRA_STATE_IDLE.equals(state)) {
+        onPhoneState(TelephonyManager.CALL_STATE_IDLE, null);
+      }
+    }
+  };
   private int sentState = -1;
   private String sentName = "";
   private String lastName = "";
@@ -94,19 +147,74 @@ final class CallWatcher {
     this.log = log;
     this.watch = watch;
     this.audio = app.getSystemService(AudioManager.class);
+    this.telephony = app.getSystemService(TelephonyManager.class);
   }
 
+  /** Safe to call again and again: it also picks up permissions that were allowed since last time. */
   void start() {
-    if (started || audio == null) {
-      return;
+    if (!started) {
+      started = true;
+      try {
+        if (audio != null) {
+          audio.addOnModeChangedListener(app.getMainExecutor(), mode -> evaluate());
+        }
+      } catch (RuntimeException e) {
+        log.add("call", "cannot follow the phone's sound mode: " + e);
+      }
+      try {
+        // Only arrives once the Phone permission is there, so it can be asked for right away.
+        app.registerReceiver(phoneReceiver, new IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED),
+            Context.RECEIVER_EXPORTED);
+      } catch (RuntimeException e) {
+        log.add("call", "cannot listen for the phone's call announcements: " + e);
+      }
     }
-    started = true;
-    try {
-      audio.addOnModeChangedListener(app.getMainExecutor(), mode -> evaluate());
-    } catch (RuntimeException e) {
-      log.add("call", "cannot follow the phone's call state: " + e);
+    if (!telephonyListening && telephony != null && has(Manifest.permission.READ_PHONE_STATE)) {
+      try {
+        telephony.registerTelephonyCallback(app.getMainExecutor(), phoneCallback);
+        telephonyListening = true;
+        log.add("call", "following ordinary phone calls");
+      } catch (RuntimeException e) {
+        log.add("call", "cannot follow ordinary phone calls: " + e);
+      }
     }
     evaluate();
+  }
+
+  /** The phone's own call state changed. {@code number} is who is calling, when Android says. */
+  private void onPhoneState(int state, String number) {
+    phoneState = state;
+    if (state == TelephonyManager.CALL_STATE_IDLE) {
+      phoneCaller = "";
+      phoneNumberSeen = false;
+    } else if (number != null && !number.isEmpty()) {
+      phoneNumberSeen = true;
+      String name = contactName(number);
+      phoneCaller = name.isEmpty() ? number : name;
+    }
+    evaluate();
+  }
+
+  /** The name the phone's contacts have for a number, or nothing. */
+  private String contactName(String number) {
+    if (!has(Manifest.permission.READ_CONTACTS)) {
+      return "";
+    }
+    Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number));
+    try (Cursor cursor = app.getContentResolver().query(uri,
+        new String[] {ContactsContract.PhoneLookup.DISPLAY_NAME}, null, null, null)) {
+      if (cursor != null && cursor.moveToFirst()) {
+        String name = cursor.getString(0);
+        return name == null ? "" : name.trim();
+      }
+    } catch (RuntimeException e) {
+      // No contacts to look in. The number is shown instead.
+    }
+    return "";
+  }
+
+  private boolean has(String permission) {
+    return app.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
   }
 
   // ---------------------------------------------------------------- from the phone
@@ -116,6 +224,9 @@ final class CallWatcher {
     Bundle extras = n == null ? null : n.extras;
     int callType = extras == null ? 0 : extras.getInt(EXTRA_CALL_TYPE, 0);
     if (n == null || extras == null || (!Notification.CATEGORY_CALL.equals(n.category) && callType == 0)) {
+      if (n != null && extras != null && PHONE_APPS.contains(sbn.getPackageName())) {
+        notePhoneAppNotification(sbn, n, extras);
+      }
       if (notes.remove(sbn.getKey()) != null) {
         evaluate();
       }
@@ -167,6 +278,39 @@ final class CallWatcher {
   void onRemoved(StatusBarNotification sbn) {
     if (notes.remove(sbn.getKey()) != null) {
       evaluate();
+    }
+  }
+
+  /**
+   * The phone app put up something that is not marked as a call. Its outline goes into the log
+   * once, in case that is how this phone announces a ringing call: which fields it has, never
+   * what is in them.
+   */
+  private void notePhoneAppNotification(StatusBarNotification sbn, Notification n, Bundle extras) {
+    StringBuilder shape = new StringBuilder(sbn.getPackageName());
+    shape.append(", kind ").append(n.category == null ? "none" : n.category);
+    shape.append(sbn.isOngoing() ? ", stays up" : ", can be swiped");
+    shape.append(n.fullScreenIntent != null ? ", opens full screen" : "");
+    shape.append(", buttons:");
+    if (n.actions == null || n.actions.length == 0) {
+      shape.append(" none");
+    } else {
+      for (Notification.Action action : n.actions) {
+        shape.append(" [").append(action == null || action.title == null ? "" : action.title).append(']');
+      }
+    }
+    shape.append(", fields:");
+    try {
+      for (String key : extras.keySet()) {
+        shape.append(' ').append(key);
+      }
+    } catch (RuntimeException e) {
+      shape.append(" unreadable");
+    }
+    String text = shape.toString();
+    if (!text.equals(lastPhoneAppShape)) {
+      lastPhoneAppShape = text;
+      log.add("call", "phone app notification: " + text);
     }
   }
 
@@ -229,12 +373,14 @@ final class CallWatcher {
 
   private int state() {
     int mode = mode();
-    if (ringingNote() != null || mode == AudioManager.MODE_RINGTONE) {
+    if (ringingNote() != null || phoneState == TelephonyManager.CALL_STATE_RINGING
+        || mode == AudioManager.MODE_RINGTONE) {
       return PhoneFrames.CALL_RINGING;
     }
     // Other apps borrow the "talking" mode for things that are not calls, so that one only counts
     // together with a call notification.
-    if (mode == AudioManager.MODE_IN_CALL || (mode == AudioManager.MODE_IN_COMMUNICATION && ongoingNote() != null)) {
+    if (phoneState == TelephonyManager.CALL_STATE_OFFHOOK || mode == AudioManager.MODE_IN_CALL
+        || (mode == AudioManager.MODE_IN_COMMUNICATION && ongoingNote() != null)) {
       return PhoneFrames.CALL_ACTIVE;
     }
     return PhoneFrames.CALL_NONE;
@@ -256,10 +402,10 @@ final class CallWatcher {
     String name = "";
     if (state == PhoneFrames.CALL_RINGING) {
       CallNote note = ringingNote();
-      name = note == null ? "" : note.name;
+      name = note != null && !note.name.isEmpty() ? note.name : phoneCaller;
     } else if (state == PhoneFrames.CALL_ACTIVE) {
       CallNote note = ongoingNote();
-      name = note != null && !note.name.isEmpty() ? note.name : lastName;
+      name = note != null && !note.name.isEmpty() ? note.name : !phoneCaller.isEmpty() ? phoneCaller : lastName;
     }
     if (!name.isEmpty()) {
       lastName = name;
@@ -291,7 +437,20 @@ final class CallWatcher {
   // ---------------------------------------------------------------- from the watch
 
   boolean hasPhonePermission() {
-    return app.checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED;
+    return has(Manifest.permission.ANSWER_PHONE_CALLS);
+  }
+
+  /** What still has to be allowed for ordinary phone calls to work fully. Empty when nothing. */
+  String[] missingPermissions() {
+    List<String> missing = new ArrayList<>();
+    for (String permission : new String[] {Manifest.permission.ANSWER_PHONE_CALLS,
+        Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG,
+        Manifest.permission.READ_CONTACTS}) {
+      if (!has(permission)) {
+        missing.add(permission);
+      }
+    }
+    return missing.toArray(new String[0]);
   }
 
   void answer() {
@@ -309,7 +468,8 @@ final class CallWatcher {
       return;
     }
     CallNote note = ringingNote();
-    boolean phoneCall = note == null || PHONE_APPS.contains(note.app);
+    boolean phoneCall = phoneState == TelephonyManager.CALL_STATE_RINGING || note == null
+        || PHONE_APPS.contains(note.app);
     if (phoneCall && hasPhonePermission()) {
       try {
         TelecomManager telecom = app.getSystemService(TelecomManager.class);
@@ -368,7 +528,8 @@ final class CallWatcher {
   /** One step of the call's own volume, which is separate from the music's. */
   void volume(boolean up) {
     int mode = mode();
-    if (audio == null || (mode != AudioManager.MODE_IN_CALL && mode != AudioManager.MODE_IN_COMMUNICATION)) {
+    if (audio == null || (state() != PhoneFrames.CALL_ACTIVE && mode != AudioManager.MODE_IN_CALL
+        && mode != AudioManager.MODE_IN_COMMUNICATION)) {
       note("watch: call volume " + (up ? "up" : "down") + ", but there is no call");
       return;
     }
@@ -395,10 +556,22 @@ final class CallWatcher {
     int state = state();
     String now = state == PhoneFrames.CALL_RINGING ? "the phone is ringing"
         : state == PhoneFrames.CALL_ACTIVE ? "in a call" : "no call right now";
-    String way = hasPhonePermission() ? "✓ Calls: " : "Calls: ";
-    return way + now + (hasPhonePermission() ? "."
-        : ". The watch answers and declines by pressing the buttons on the call notification. Allowing Phone "
-            + "below lets it ask Android directly as well, which is the surer way for ordinary phone calls.");
+    boolean phone = has(Manifest.permission.ANSWER_PHONE_CALLS) && has(Manifest.permission.READ_PHONE_STATE);
+    boolean names = has(Manifest.permission.READ_CALL_LOG) && has(Manifest.permission.READ_CONTACTS);
+    if (phone && names) {
+      return "✓ Calls: " + now + ".";
+    }
+    if (phone) {
+      return "Calls: " + now + ". Ordinary phone calls reach the watch, but without the caller: Android only "
+          + "says who is calling to apps allowed to see Call logs, and the name comes from Contacts.";
+    }
+    return "✗ Calls: " + now + ". WhatsApp calls work as they are. For ordinary phone calls the Phone permission "
+        + "is needed (to know that the phone rings, and to answer or hang up), plus Call logs and Contacts to "
+        + "show who is calling.";
+  }
+
+  private static String yesNo(boolean value) {
+    return value ? "yes" : "no";
   }
 
   /** For the report. Never includes who is calling. */
@@ -407,7 +580,16 @@ final class CallWatcher {
     int state = state();
     sb.append("Call state: ").append(state == PhoneFrames.CALL_RINGING ? "ringing"
         : state == PhoneFrames.CALL_ACTIVE ? "in a call" : "none").append(", sound mode: ").append(mode()).append('\n');
-    sb.append("Phone permission: ").append(hasPhonePermission() ? "yes" : "no").append('\n');
+    sb.append("Allowed: answer calls ").append(yesNo(has(Manifest.permission.ANSWER_PHONE_CALLS)))
+        .append(", phone state ").append(yesNo(has(Manifest.permission.READ_PHONE_STATE)))
+        .append(", call logs ").append(yesNo(has(Manifest.permission.READ_CALL_LOG)))
+        .append(", contacts ").append(yesNo(has(Manifest.permission.READ_CONTACTS))).append('\n');
+    sb.append("Following ordinary phone calls: ").append(yesNo(telephonyListening)).append(", phone says: ")
+        .append(phoneState == TelephonyManager.CALL_STATE_RINGING ? "ringing"
+            : phoneState == TelephonyManager.CALL_STATE_OFFHOOK ? "in a call" : "idle")
+        .append(", number given for this call: ").append(yesNo(phoneNumberSeen)).append('\n');
+    sb.append("Last other notification from the phone app: ")
+        .append(lastPhoneAppShape.isEmpty() ? "none yet" : lastPhoneAppShape).append('\n');
     sb.append("Call notifications showing: ").append(notes.size()).append('\n');
     sb.append("Last call notification seen: ").append(lastShape.isEmpty() ? "none yet" : lastShape).append('\n');
     sb.append("Last thing asked by the watch: ").append(lastAction.isEmpty() ? "nothing yet" : lastAction).append('\n');
