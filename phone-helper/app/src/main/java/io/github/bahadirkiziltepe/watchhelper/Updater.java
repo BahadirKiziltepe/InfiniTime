@@ -33,6 +33,7 @@ import java.util.zip.ZipFile;
 
 import no.nordicsemi.android.dfu.DfuProgressListener;
 import no.nordicsemi.android.dfu.DfuProgressListenerAdapter;
+import no.nordicsemi.android.dfu.DfuServiceController;
 import no.nordicsemi.android.dfu.DfuServiceInitiator;
 import no.nordicsemi.android.dfu.DfuServiceListenerHelper;
 
@@ -91,6 +92,15 @@ final class Updater {
   private static final long AUTO_CHECK_EVERY_MS = 10 * 60 * 1000;
   private static final long SILENCE_CHECK_MS = 15_000;
   private static final long SILENCE_LIMIT_MS = 90_000;
+  /** How long the update library gets to stop after being told to. */
+  private static final long STOP_GRACE_MS = 20_000;
+  /** After a failed try the watch needs about ten seconds to forget it. */
+  private static final long COOL_DOWN_MS = 20_000;
+  /** The connection's standard message size. A watch update is only sent while it is this. */
+  private static final int STANDARD_MESSAGE_SIZE = 23;
+  private static final int INIT_PACKET_BYTES = 14;
+  /** The watch stores an update in blocks of this size. See verify(). */
+  private static final int WATCH_BLOCK_BYTES = 200;
 
   private static final String PREFS = "updates";
   private static final String KEY_LAST_INSTALLED = "lastInstalled";
@@ -113,6 +123,14 @@ final class Updater {
   private long lastCheckAt;
   private long lastSignalAt;
   private WatchBuild installing;
+  private DfuServiceController controller;
+  private boolean stopping;
+  private boolean stuck;
+  private long retryNotBefore;
+  // After an update: wait for the watch to restart and link again before talking about Validate.
+  private boolean awaitingRelink;
+  private boolean sawLinkDrop;
+  private int relinkBuild;
 
   private final Runnable silenceCheck = this::onSilenceCheck;
 
@@ -334,8 +352,25 @@ final class Updater {
       setStatus("✗ The watch is not linked. Do step 3 first.");
       return;
     }
+    if (stuck) {
+      setStatus("✗ An earlier update try never finished. Force stop this app (App info, Force stop), open it "
+          + "again, and then try.");
+      return;
+    }
+    long wait = retryNotBefore - SystemClock.elapsedRealtime();
+    if (wait > 0) {
+      setStatus("The watch needs a moment after the last try. Tap again in " + (wait / 1000 + 1) + " seconds.");
+      return;
+    }
+    if (watch.messageSize() != STANDARD_MESSAGE_SIZE) {
+      // The watch's update code needs 20-byte pieces, which only the standard size guarantees.
+      setStatus("✗ Another app changed the Bluetooth connection to the watch. Stop Gadgetbridge, switch "
+          + "Bluetooth off and on, wait for the watch to link, and try again.");
+      return;
+    }
     busy = true;
     installing = build;
+    awaitingRelink = false;
     log.add("update", "downloading watch build " + build.number);
     setStatus("Downloading watch build " + build.number + "…");
     final File target = new File(app.getCacheDir(), "watch-build-" + build.number + ".zip");
@@ -379,12 +414,14 @@ final class Updater {
     log.add("update", "build " + build.number + " passed the checks; sending it to the watch");
     watch.setPaused(true);
     sending = true;
+    stopping = false;
     lastSignalAt = SystemClock.elapsedRealtime();
     DfuServiceListenerHelper.registerProgressListener(app, progress);
     try {
-      new DfuServiceInitiator(address)
+      controller = new DfuServiceInitiator(address)
           .setDeviceName("InfiniTime")
-          .setKeepBond(false)
+          // If the phone happens to be paired with the watch, leave that pairing alone.
+          .setKeepBond(true)
           .setForeground(false)
           .setDisableNotification(true)
           // Essential. The watch's update code only copes with pieces of at most 20 bytes
@@ -454,12 +491,31 @@ final class Updater {
     setStatus(text + "\nKeep this screen open and the watch close.");
   }
 
-  /** The update library always reports an end. This catches the case where Android stopped it. */
+  /**
+   * The update library waits for the watch without a time limit. If nothing has moved for a
+   * while, tell it to stop; if it does not even do that, refuse further tries in this run of the
+   * app, so a stuck try can never come back to life and send something unattended.
+   */
   private void onSilenceCheck() {
     if (!sending) {
       return;
     }
-    if (SystemClock.elapsedRealtime() - lastSignalAt > SILENCE_LIMIT_MS) {
+    long quiet = SystemClock.elapsedRealtime() - lastSignalAt;
+    if (!stopping && quiet > SILENCE_LIMIT_MS) {
+      stopping = true;
+      lastSignalAt = SystemClock.elapsedRealtime();
+      log.add("update", "nothing has moved for a while; telling the updater to stop");
+      try {
+        if (controller != null) {
+          controller.abort();
+        }
+      } catch (RuntimeException ignored) {
+        // Handled by the grace period below.
+      }
+      setStatus("The update stopped making progress. Stopping it…");
+      main.postDelayed(silenceCheck, SILENCE_CHECK_MS);
+    } else if (stopping && quiet > STOP_GRACE_MS) {
+      stuck = true;
       finish(false, "the updater stopped answering");
     } else {
       main.postDelayed(silenceCheck, SILENCE_CHECK_MS);
@@ -480,20 +536,52 @@ final class Updater {
     sending = false;
     busy = false;
     installing = null;
+    controller = null;
+    stopping = false;
     watch.setPaused(false);
     String number = build == null ? "" : String.valueOf(build.number);
     if (ok) {
       if (build != null) {
         prefs.edit().putInt(KEY_LAST_INSTALLED, build.number).apply();
+        relinkBuild = build.number;
       }
+      awaitingRelink = true;
+      sawLinkDrop = !watch.isReady();
       log.add("update", "build " + number + " sent; the watch restarts with it");
-      setStatus("✓ Build " + number + " is on the watch. It restarts and switches over, which takes about a "
-          + "minute.\nThen on the watch: swipe up, tap the gear, Firmware, Validate. Without that it goes back to "
-          + "the old build at its next restart.");
+      setStatus("✓ Build " + number + " is on the watch. It is restarting and switching over, which takes "
+          + "about a minute.\nDo not validate yet. Wait until this app says the watch is linked again.");
     } else {
+      retryNotBefore = SystemClock.elapsedRealtime() + COOL_DOWN_MS;
       log.add("update", "build " + number + " did not go through: " + problem);
-      setStatus("✗ Build " + number + " did not go through: " + problem + ".\nThe watch keeps the build it "
-          + "had. On the watch: swipe up, tap the gear, Over-the-air must say Enabled. Then try again.");
+      if (stuck) {
+        setStatus("✗ Build " + number + " did not go through: " + problem + ".\nThe watch keeps the build it "
+            + "had. Before trying again, force stop this app (App info, Force stop) and open it again.");
+      } else {
+        setStatus("✗ Build " + number + " did not go through: " + problem + ".\nThe watch keeps the build it "
+            + "had. On the watch: swipe up, tap the gear, Over-the-air must say Enabled. Wait 20 seconds, then try "
+            + "again.");
+      }
+    }
+  }
+
+  /**
+   * Called whenever the watch link changes. After an update, the advice about Validate is only
+   * shown once the watch has restarted and linked again: validating is the one step that cannot
+   * be undone, so it should follow a look at the new build, not come before it.
+   */
+  void onWatchLinkChanged() {
+    if (!awaitingRelink) {
+      return;
+    }
+    if (!watch.isReady()) {
+      sawLinkDrop = true;
+    } else if (sawLinkDrop) {
+      awaitingRelink = false;
+      log.add("update", "the watch is back and linked after the update");
+      setStatus("✓ The watch is back with build " + relinkBuild + " and linked again.\nCheck it first: the "
+          + "time, a song, and that swipe up and the gear still open Settings. If all is well, on the watch: swipe "
+          + "up, tap the gear, Firmware, Validate.\nIf something is wrong, do not validate. Hold the watch's "
+          + "button for about 8 seconds until it restarts, and it goes back to the build it had.");
     }
   }
 
@@ -508,6 +596,10 @@ final class Updater {
       ZipEntry manifestEntry = zip.getEntry("manifest.json");
       if (manifestEntry == null) {
         return "it is not a watch update file";
+      }
+      // Exactly the description, the watch app and its small header. Nothing else may ride along.
+      if (zip.size() != 3) {
+        return "it holds files that do not belong in a watch update";
       }
       JSONObject manifest;
       try (InputStream in = zip.getInputStream(manifestEntry)) {
@@ -530,6 +622,20 @@ final class Updater {
       }
       if (image.getSize() <= 0 || image.getSize() > MAX_IMAGE_BYTES) {
         return "the watch app in it is the wrong size";
+      }
+      // The watch only switches to a new build if the last block it stores is a partial one. An
+      // image that is an exact number of blocks would upload fine and then never be used.
+      if (image.getSize() % WATCH_BLOCK_BYTES == 0) {
+        return "this build's size trips a flaw in the watch's own updater, so the watch would ignore it. It needs "
+            + "rebuilding";
+      }
+      byte[] header;
+      try (InputStream in = zip.getInputStream(init)) {
+        header = readUpTo(in, INIT_PACKET_BYTES + 1);
+      }
+      // The header the watch reads: 14 bytes, declaring exactly one entry in its version list.
+      if (header.length != INIT_PACKET_BYTES || header[8] != 1 || header[9] != 0) {
+        return "its header is not what the watch expects";
       }
       byte[] head;
       try (InputStream in = zip.getInputStream(image)) {

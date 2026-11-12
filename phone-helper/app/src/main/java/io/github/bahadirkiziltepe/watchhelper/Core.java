@@ -171,6 +171,9 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
 
   @Override
   public void onWatchChanged() {
+    if (updater != null) {
+      updater.onWatchLinkChanged();
+    }
     changed();
   }
 

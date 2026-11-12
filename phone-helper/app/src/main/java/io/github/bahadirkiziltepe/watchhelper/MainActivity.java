@@ -243,7 +243,8 @@ public class MainActivity extends Activity {
     bluetoothButtons.setVisibility(bluetooth ? View.GONE : View.VISIBLE);
 
     watchStatus.setText(core.watch.describe());
-    findButton.setEnabled(bluetooth);
+    // Looking for the watch reopens the connection, which must not happen during an update.
+    findButton.setEnabled(bluetooth && !core.updater.busy());
 
     boolean background = core.mayRunInBackground();
     backgroundStatus.setText(background ? "✓ Android will not put this app to sleep."

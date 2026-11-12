@@ -1004,6 +1004,11 @@ final class WatchLink {
     return ready;
   }
 
+  /** The connection's current message size (23 unless another app on the same connection raised it). */
+  int messageSize() {
+    return mtu;
+  }
+
   /** A few lines for the screen. */
   String describe() {
     StringBuilder sb = new StringBuilder(phase);
