@@ -54,6 +54,11 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   static final int EVENT_OPEN = 0xe0;
 
   private static final String GADGETBRIDGE = "nodomain.freeyourgadget.gadgetbridge";
+  /**
+   * The Claude app. Its notifications are not passed on to the watch; the watch only shows a dot
+   * on its main screen for as long as at least one of them is waiting on the phone.
+   */
+  private static final String CLAUDE = "com.anthropic.claude";
   private static final String FROM_WATCH = "watch button";
 
   private static Core instance;
@@ -85,6 +90,9 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   private boolean watchWasReady;
   /** The phone's battery in percent, as last announced by Android. */
   private int phoneBattery = UNKNOWN_LEVEL;
+
+  /** The Claude notifications on the phone right now, by Android's name for each. */
+  private final java.util.Set<String> claudeWaiting = new java.util.HashSet<>();
 
   private final List<Runnable> screens = new ArrayList<>();
   private boolean screenUpdatePosted;
@@ -180,18 +188,47 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     // Start from what the phone is showing right now.
     notifications.sync(MediaListenerService.showing(), MediaListenerService.ranking());
     StatusBarNotification[] showing = MediaListenerService.showing();
+    claudeWaiting.clear();
     if (showing != null) {
       for (StatusBarNotification sbn : showing) {
         if (sbn != null) {
           calls.onPosted(sbn);
+          noteClaude(sbn, true);
         }
       }
     }
+    watch.setWaitingMark(!claudeWaiting.isEmpty());
     changed();
+  }
+
+  /** Keeps count of the Claude app's notifications, and tells the watch when the first comes or the last goes. */
+  private void noteClaude(StatusBarNotification sbn, boolean posted) {
+    if (!CLAUDE.equals(sbn.getPackageName())) {
+      return;
+    }
+    boolean before = !claudeWaiting.isEmpty();
+    // One that cannot be swiped away is the app saying that it is busy, not that it has something to say.
+    if (posted && !sbn.isOngoing()) {
+      claudeWaiting.add(sbn.getKey());
+    } else {
+      claudeWaiting.remove(sbn.getKey());
+    }
+    boolean now = !claudeWaiting.isEmpty();
+    if (now != before) {
+      log.add("notify", now ? "Claude has a notification waiting: the watch shows its dot"
+          : "no Claude notification is waiting any more: the watch's dot goes");
+      watch.setWaitingMark(now);
+    }
+  }
+
+  /** How many Claude notifications are waiting, for the report. */
+  int claudeWaiting() {
+    return claudeWaiting.size();
   }
 
   void onNotificationPosted(StatusBarNotification sbn, NotificationListenerService.RankingMap ranking) {
     calls.onPosted(sbn);
+    noteClaude(sbn, true);
     if (NotificationRelay.relays(sbn.getPackageName())) {
       notifications.onPosted(sbn, ranking);
       changed();
@@ -200,6 +237,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
 
   void onNotificationRemoved(StatusBarNotification sbn) {
     calls.onRemoved(sbn);
+    noteClaude(sbn, false);
     if (NotificationRelay.relays(sbn.getPackageName())) {
       notifications.onRemoved(sbn);
       changed();
@@ -209,6 +247,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   void onListenerDisconnected() {
     log.add("app", "notification access was switched off");
     spotify.stop();
+    claudeWaiting.clear();
+    watch.setWaitingMark(false);
   }
 
   boolean hasNotificationAccess() {

@@ -164,6 +164,7 @@ final class WatchLink {
   private int levelVolumeSteps = UNKNOWN_BYTE;
   private int levelBattery = UNKNOWN_BYTE;
   private int trackFlags;
+  private boolean waitingMark;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -883,10 +884,23 @@ final class WatchLink {
     }
   }
 
-  /** The button states, the levels and the song's flags travel together, in the channel the button states had first. */
+  /**
+   * Shows or hides the orange dot next to the battery numbers on the watch's main screen (watch
+   * build 11 and newer; older builds ignore it). It says that something is waiting on the phone,
+   * and nothing about what.
+   */
+  void setWaitingMark(boolean waiting) {
+    if (waiting != waitingMark) {
+      waitingMark = waiting;
+      putPhoneState();
+    }
+  }
+
+  /** The button states, the levels and the marks travel together, in the channel the button states had first. */
   private void putPhoneState() {
+    int marks = (trackFlags & 0x01) | (waitingMark ? 0x02 : 0);
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
-        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) trackFlags});
+        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks});
     pump();
   }
 

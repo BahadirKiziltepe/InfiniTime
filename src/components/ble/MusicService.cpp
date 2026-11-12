@@ -53,7 +53,8 @@ namespace {
   // Not part of stock InfiniTime: the state of the shuffle, repeat and save buttons (three bytes),
   // followed since phone app build 7 by the phone's media volume, its number of volume steps and
   // the phone's battery in percent, and since build 8 by a byte of flags about the song that is
-  // playing (bit 0: Spotify picked it, it is not in the playlist).
+  // playing (bit 0: Spotify picked it, it is not in the playlist) and other marks for the main
+  // screen (bit 1: Claude has a notification waiting on the phone).
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
   // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
   // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is

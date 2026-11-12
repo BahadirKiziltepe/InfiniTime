@@ -38,6 +38,8 @@ namespace {
 
   // Second line of the top bar, under the battery numbers
   constexpr lv_coord_t markerOffsetY = 24;
+  constexpr lv_coord_t waitingDotSize = 12;
+  constexpr lv_coord_t waitingDotGap = 6;
 
   constexpr lv_coord_t textWidth = 232;
   constexpr lv_coord_t playerIconOffsetX = 8;
@@ -138,6 +140,19 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   labelBattery = lv_label_create(lv_scr_act(), nullptr);
   lv_label_set_text_static(labelBattery, "");
   lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, 0, 0);
+
+  // An orange dot left of the battery numbers says that Claude has a notification waiting on the
+  // phone. Only that it is there: what it says never comes to the watch, and it is not among the
+  // notifications either.
+  waitingDot = lv_obj_create(lv_scr_act(), nullptr);
+  lv_obj_set_size(waitingDot, waitingDotSize, waitingDotSize);
+  lv_obj_set_style_local_radius(waitingDot, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_RADIUS_CIRCLE);
+  lv_obj_set_style_local_bg_opa(waitingDot, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
+  lv_obj_set_style_local_bg_color(waitingDot, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, Colors::orange);
+  lv_obj_set_style_local_border_width(waitingDot, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
+  lv_obj_set_click(waitingDot, false);
+  lv_obj_set_hidden(waitingDot, true);
+  lv_obj_align(waitingDot, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
 
   notificationIcon = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(notificationIcon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_LIME);
@@ -290,6 +305,7 @@ void WatchFaceRemote::UpdateLevels() {
   const bool connected = bleController.IsConnected();
   const uint8_t watchBattery = batteryController.PercentRemaining();
   const uint8_t phoneBattery = connected ? musicService.getPhoneBattery() : Music::StateUnknown;
+  bool batteryMoved = false;
   if (watchBattery != shownWatchBattery || phoneBattery != shownPhoneBattery) {
     shownWatchBattery = watchBattery;
     shownPhoneBattery = phoneBattery;
@@ -299,6 +315,15 @@ void WatchFaceRemote::UpdateLevels() {
       lv_label_set_text_fmt(labelBattery, "%d", watchBattery);
     }
     lv_obj_realign(labelBattery);
+    batteryMoved = true;
+  }
+
+  // The dot sits right next to the numbers, so it moves when they get wider or narrower
+  const bool waiting = connected && musicService.hasWaitingMark();
+  if (waiting != shownWaiting || (waiting && batteryMoved)) {
+    shownWaiting = waiting;
+    lv_obj_set_hidden(waitingDot, !waiting);
+    lv_obj_align(waitingDot, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
   }
 
   // The number is the phone's own, so it also follows the phone's volume keys

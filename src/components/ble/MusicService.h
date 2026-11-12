@@ -153,10 +153,18 @@ namespace Pinetime {
         return (trackFlags & TrackSmart) != 0;
       }
 
+      // True while an app the wearer wants to know about has a notification waiting on the phone.
+      // The phone app decides which app that is (Claude) and only passes on the fact, never what
+      // the notification says. It is bit 1 of the same byte.
+      bool hasWaitingMark() const {
+        return (trackFlags & WaitingMark) != 0;
+      }
+
       enum MusicStatus { NotPlaying = 0x00, Playing = 0x01 };
 
     private:
       static constexpr uint8_t TrackSmart = 0x01;
+      static constexpr uint8_t WaitingMark = 0x02;
 
       int OnPhoneMessage(struct os_mbuf* om);
       void Send(const uint8_t* data, uint16_t length);
