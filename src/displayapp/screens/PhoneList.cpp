@@ -133,7 +133,7 @@ PhoneList::PhoneList(DisplayApp* app,
   labelHint = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelHint, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
   lv_label_set_align(labelHint, LV_LABEL_ALIGN_CENTER);
-  lv_label_set_text_static(labelHint, "Tap: call\nSwipe: back");
+  lv_label_set_text_static(labelHint, "Tap: call\nHold: cancel");
   lv_obj_align(labelHint, lv_scr_act(), LV_ALIGN_IN_BOTTOM_MID, 0, -6);
   lv_obj_set_hidden(labelHint, true);
 
@@ -307,10 +307,16 @@ void PhoneList::OnTap(Widgets::TapPad::Events tap, TickType_t now) {
     return;
   }
   if (confirming) {
-    if (!calling && isTap) {
-      calling = true;
-      confirmTick = now;
-      Act(Pinetime::Controllers::MusicService::ActionTap, confirmIndex, "Calling...");
+    if (!calling) {
+      if (isTap) {
+        calling = true;
+        confirmTick = now;
+        Act(Pinetime::Controllers::MusicService::ActionTap, confirmIndex, "Calling...");
+      } else {
+        // Holding takes the question back, the way holding a ringing call declines it
+        motorController.RunForDuration(confirmBuzzMs);
+        StopConfirming();
+      }
       needsDraw = true;
     }
     return;
@@ -464,9 +470,19 @@ void PhoneList::Draw() {
 }
 
 bool PhoneList::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
+  const bool swipe = event == TouchEvents::SwipeUp || event == TouchEvents::SwipeDown || event == TouchEvents::SwipeLeft ||
+                     event == TouchEvents::SwipeRight;
+  if (!swipe) {
+    // The touch controller also reports every tap and hold here. Those are told apart by the tap
+    // pad and are nothing to act on in this place. (Taking them for a swipe is what made the
+    // question "Call ...?" go away a moment after the tap that had asked it.)
+    return false;
+  }
   if (confirming) {
-    // Any swipe takes the question back
-    StopConfirming();
+    // A swipe takes the question back too. Once the call has been asked for there is nothing to take back.
+    if (!calling) {
+      StopConfirming();
+    }
     return true;
   }
   switch (event) {

@@ -30,7 +30,8 @@ namespace Pinetime {
        *   there, and the playlists are one swipe to the left further on.
        * - Playlists: a tap opens the songs, a hold plays the playlist.
        * - Songs: a tap adds the song to the queue, a hold plays it in its playlist.
-       * - Contacts: a tap asks "Call ...?", a second tap makes the phone place the call.
+       * - Contacts: a tap asks "Call ...?". A second tap makes the phone place the call; holding the
+       *   screen, or a swipe, takes the question back. It also goes away by itself after ten seconds.
        * - A star in front of a song means Spotify picked it itself (Smart Shuffle), the play sign
        *   means it is the song that is playing.
        *
