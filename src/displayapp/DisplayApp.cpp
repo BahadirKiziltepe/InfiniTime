@@ -420,18 +420,15 @@ void DisplayApp::Refresh() {
         };
         if (!currentScreen->OnTouchEvent(gesture)) {
           if (currentApp == Apps::Clock) {
+            // The main screen is a music remote. It handles left/right swipes itself (volume),
+            // there is no app launcher, and a double tap does not put the watch to sleep
+            // because the playback buttons can be tapped quickly in a row.
             switch (gesture) {
               case TouchEvents::SwipeUp:
-                LoadNewScreen(Apps::Launcher, DisplayApp::FullRefreshDirections::Up);
+                LoadNewScreen(Apps::QuickSettings, DisplayApp::FullRefreshDirections::Up);
                 break;
               case TouchEvents::SwipeDown:
                 LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
-                break;
-              case TouchEvents::SwipeRight:
-                LoadNewScreen(Apps::QuickSettings, DisplayApp::FullRefreshDirections::RightAnim);
-                break;
-              case TouchEvents::DoubleTap:
-                PushMessageToSystemTask(System::Messages::GoToSleep);
                 break;
               default:
                 break;
@@ -456,8 +453,6 @@ void DisplayApp::Refresh() {
         if (currentApp != Apps::Clock) {
           if (currentApp == Apps::Notifications) {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Up);
-          } else if (currentApp == Apps::QuickSettings) {
-            LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::LeftAnim);
           } else {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Down);
           }
@@ -585,6 +580,7 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
                                                                dateTimeController,
                                                                brightnessController,
                                                                motorController,
+                                                               motionController,
                                                                settingsController,
                                                                bleController,
                                                                alarmController);

@@ -32,6 +32,7 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
                              Controllers::DateTime& dateTimeController,
                              Controllers::BrightnessController& brightness,
                              Controllers::MotorController& motorController,
+                             Controllers::MotionController& motionController,
                              Pinetime::Controllers::Settings& settingsController,
                              const Controllers::Ble& bleController,
                              const Controllers::AlarmController& alarmController)
@@ -39,6 +40,7 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
     dateTimeController {dateTimeController},
     brightness {brightness},
     motorController {motorController},
+    motionController {motionController},
     settingsController {settingsController},
     statusIcons(batteryController, bleController, alarmController) {
 
@@ -80,10 +82,12 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
   lv_obj_set_size(btn2, buttonWidth, buttonHeight);
   lv_obj_align(btn2, nullptr, LV_ALIGN_IN_TOP_RIGHT, -buttonXOffset, barHeight);
 
+  // Today's step count. Tapping the button opens the Steps screen.
+  btn2_lbl = lv_label_create(btn2, nullptr);
+  lv_label_set_align(btn2_lbl, LV_LABEL_ALIGN_CENTER);
+  lv_label_set_text_static(btn2_lbl, Symbols::shoe);
+
   lv_obj_t* lbl_btn;
-  lbl_btn = lv_label_create(btn2, nullptr);
-  lv_obj_set_style_local_text_font(lbl_btn, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_sys_48);
-  lv_label_set_text_static(lbl_btn, Symbols::flashlight);
 
   btn3 = lv_btn_create(lv_scr_act(), nullptr);
   btn3->user_data = this;
@@ -133,12 +137,13 @@ QuickSettings::~QuickSettings() {
 
 void QuickSettings::UpdateScreen() {
   lv_label_set_text(label_time, dateTimeController.FormattedTime().c_str());
+  lv_label_set_text_fmt(btn2_lbl, "%s\n%lu", Symbols::shoe, static_cast<unsigned long>(motionController.NbSteps()));
   statusIcons.Update();
 }
 
 void QuickSettings::OnButtonEvent(lv_obj_t* object) {
   if (object == btn2) {
-    app->StartApp(Apps::FlashLight, DisplayApp::FullRefreshDirections::Up);
+    app->StartApp(Apps::Steps, DisplayApp::FullRefreshDirections::Up);
   } else if (object == btn1) {
 
     brightness.Step();

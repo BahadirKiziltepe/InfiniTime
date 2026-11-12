@@ -212,11 +212,17 @@ int Pinetime::Controllers::MusicService::getTrackLength() const {
 }
 
 void Pinetime::Controllers::MusicService::event(char event) {
-  auto* om = ble_hs_mbuf_from_flat(&event, 1);
-
   uint16_t connectionHandle = nimble.connHandle();
 
   if (connectionHandle == 0 || connectionHandle == BLE_HS_CONN_HANDLE_NONE) {
+    return;
+  }
+
+  // Allocate the buffer only once we know there is a connection to send it on.
+  // Allocating first and returning above leaked one of the 12 buffers of the BLE stack
+  // on every event sent while disconnected.
+  auto* om = ble_hs_mbuf_from_flat(&event, 1);
+  if (om == nullptr) {
     return;
   }
 

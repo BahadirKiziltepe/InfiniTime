@@ -29,25 +29,18 @@ namespace Pinetime {
         static constexpr int entriesPerScreen = 4;
 
         // Increment this when more space is needed
-        static constexpr int nScreens = 4;
+        static constexpr int nScreens = 2;
 
+        // Only the settings this firmware still needs. Firmware comes first because
+        // every new build has to be validated there.
         static constexpr std::array<List::Applications, entriesPerScreen * nScreens> entries {{
+          {Symbols::check, "Firmware", Apps::FirmwareValidation},
+          {Symbols::shieldAlt, "Over-the-air", Apps::SettingOTA},
           {Symbols::sun, "Display", Apps::SettingDisplay},
           {Symbols::eye, "Wake Up", Apps::SettingWakeUp},
+
           {Symbols::clock, "Time format", Apps::SettingTimeFormat},
-          {Symbols::home, "Watch face", Apps::SettingWatchFace},
-
-          {Symbols::shoe, "Steps", Apps::SettingSteps},
-          {Symbols::heartBeat, "Heartrate", Apps::SettingHeartRate},
-          {Symbols::clock, "Date & Time", Apps::SettingSetDateTime},
-          {Symbols::cloudSunRain, "Weather", Apps::SettingWeatherFormat},
-
           {Symbols::batteryHalf, "Battery", Apps::BatteryInfo},
-          {Symbols::clock, "Chimes", Apps::SettingChimes},
-          {Symbols::tachometer, "Shake Calib.", Apps::SettingShakeThreshold},
-          {Symbols::check, "Firmware", Apps::FirmwareValidation},
-
-          {Symbols::shieldAlt, "Over-the-air", Apps::SettingOTA},
           {Symbols::bluetooth, "Bluetooth", Apps::SettingBluetooth},
           {Symbols::list, "About", Apps::SysInfo},
         }};

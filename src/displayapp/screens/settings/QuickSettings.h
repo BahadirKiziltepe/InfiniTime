@@ -6,6 +6,7 @@
 #include "components/datetime/DateTimeController.h"
 #include "components/brightness/BrightnessController.h"
 #include "components/motor/MotorController.h"
+#include "components/motion/MotionController.h"
 #include "components/settings/Settings.h"
 #include "components/battery/BatteryController.h"
 #include "displayapp/widgets/StatusIcons.h"
@@ -22,6 +23,7 @@ namespace Pinetime {
                       Controllers::DateTime& dateTimeController,
                       Controllers::BrightnessController& brightness,
                       Controllers::MotorController& motorController,
+                      Controllers::MotionController& motionController,
                       Pinetime::Controllers::Settings& settingsController,
                       const Controllers::Ble& bleController,
                       const Controllers::AlarmController& alarmController);
@@ -37,6 +39,7 @@ namespace Pinetime {
         Controllers::DateTime& dateTimeController;
         Controllers::BrightnessController& brightness;
         Controllers::MotorController& motorController;
+        Controllers::MotionController& motionController;
         Controllers::Settings& settingsController;
 
         lv_task_t* taskUpdate;
@@ -47,6 +50,7 @@ namespace Pinetime {
         lv_obj_t* btn1;
         lv_obj_t* btn1_lvl;
         lv_obj_t* btn2;
+        lv_obj_t* btn2_lbl;
         lv_obj_t* btn3;
         lv_obj_t* btn3_lvl;
         lv_obj_t* btn4;
