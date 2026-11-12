@@ -1,0 +1,69 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The GitHub build passes its run number, so every published build is newer than the last
+// and installs over it.
+def buildNumber = System.getenv('HELPER_VERSION_CODE') ?: '1'
+
+android {
+    namespace 'io.github.bahadirkiziltepe.watchhelper'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'io.github.bahadirkiziltepe.watchhelper'
+        minSdk 33
+        targetSdk 34
+        versionCode buildNumber.toInteger()
+        versionName "0.${buildNumber}"
+    }
+
+    signingConfigs {
+        // Every build is signed with the same key so a new build installs over the old one and
+        // keeps its permissions. See signing/README.md: the key is public, like the rest of the repo.
+        helper {
+            storeFile rootProject.file('signing/helper-key.p12')
+            storeType 'PKCS12'
+            storePassword 'watch-helper'
+            keyAlias 'helper'
+            keyPassword 'watch-helper'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.helper
+        }
+        debug {
+            signingConfig signingConfigs.helper
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+        textReport true
+    }
+}
+
+dependencies {
+    // Reads the standard shuffle and repeat modes that plain Android does not expose.
+    implementation 'androidx.media:media:1.7.0'
+
+    // Nordic Semiconductor's firmware update library: the same one Gadgetbridge and nRF Connect
+    // use to update this watch.
+    implementation 'no.nordicsemi.android:dfu:2.9.0'
+
+    constraints {
+        // Older transitive copies of these clash with the Kotlin standard library they were merged into.
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22')
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22')
+    }
+}

@@ -1,0 +1,61 @@
+package io.github.bahadirkiziltepe.watchhelper;
+
+import android.content.Context;
+import android.os.Build;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+
+/** Builds the text the user copies or shares so the app's behaviour can be checked from afar. */
+final class Report {
+  private Report() {
+  }
+
+  static String build(Core core) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("WATCH HELPER REPORT\n");
+    sb.append("Helper ").append(core.version()).append(", ")
+        .append(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT)))
+        .append('\n');
+    sb.append("Phone: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ")
+        .append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n");
+    sb.append("Spotify app: ").append(spotifyVersion(core.app)).append('\n');
+
+    sb.append("\n== Setup ==\n");
+    sb.append("Notification access: ").append(core.hasNotificationAccess() ? "yes" : "no").append('\n');
+    sb.append("Allowed to keep running: ").append(core.mayRunInBackground() ? "yes" : "no").append('\n');
+    sb.append("Gadgetbridge installed: ").append(core.gadgetbridgeInstalled() ? "yes" : "no").append('\n');
+
+    sb.append("\n== Watch ==\n");
+    sb.append(core.watch.dump());
+
+    sb.append("\n== Watch updates ==\n");
+    sb.append(core.updater.dump());
+
+    sb.append("\n== Spotify ==\n");
+    sb.append(core.spotify.dump());
+
+    sb.append("\n== What happened ==\n");
+    if (core.log.dropped() > 0) {
+      sb.append('(').append(core.log.dropped()).append(" older lines left out)\n");
+    }
+    for (String line : core.log.all()) {
+      sb.append(line).append('\n');
+    }
+    return scrub(sb.toString());
+  }
+
+  private static String spotifyVersion(Context app) {
+    try {
+      return app.getPackageManager().getPackageInfo(SpotifyWatcher.SPOTIFY, 0).versionName;
+    } catch (Exception e) {
+      return "not found";
+    }
+  }
+
+  /** Belt and braces: nothing above prints a Bluetooth address, but make sure none slips through. */
+  static String scrub(String text) {
+    return text.replaceAll("(?i)\\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\\b", "(address hidden)");
+  }
+}

@@ -1,0 +1,137 @@
+name: Phone app build
+
+# Builds the Android companion app in phone-helper/ on every push to the
+# "watch" branch that touches it, and publishes the installable file as a
+# GitHub Release, so it can be downloaded straight onto the phone.
+
+on:
+  push:
+    branches: [ watch ]
+    paths:
+      - 'phone-helper/**'
+      - '.github/workflows/helper-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: helper-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build phone app
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source files
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '8.10.2'
+          cache-disabled: true
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager="${ANDROID_HOME:-/nonexistent}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager" ]; then
+            echo "Android SDK manager not found (ANDROID_HOME=${ANDROID_HOME:-unset})"
+            ls -la "${ANDROID_HOME:-/usr/local/lib/android}" || true
+            exit 1
+          fi
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build
+        shell: bash
+        working-directory: phone-helper
+        env:
+          HELPER_VERSION_CODE: ${{ github.run_number }}
+        run: gradle --no-daemon --console=plain :app:assembleRelease
+
+      # Static checks only. Their findings are printed for review and never block the build.
+      - name: Static checks
+        continue-on-error: true
+        shell: bash
+        working-directory: phone-helper
+        env:
+          HELPER_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          gradle --no-daemon --console=plain :app:lintRelease || true
+          cat app/build/reports/lint-results-release.txt || true
+
+      - name: Collect the installable file
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_ref="$(git rev-parse --short HEAD)"
+          subject="$(git log -1 --format=%s)"
+          apk=phone-helper/app/build/outputs/apk/release/app-release.apk
+          [ -f "$apk" ]
+          size="$(stat -c %s "$apk")"
+
+          mkdir -p out
+          cp "$apk" "out/watch-helper-${GITHUB_RUN_NUMBER}.apk"
+
+          tools="${ANDROID_HOME}/build-tools/35.0.0"
+          echo "--- what is in the app ---"
+          "$tools/aapt2" dump badging "$apk" | grep -E "^(package:|sdkVersion|targetSdkVersion|application-label:|uses-permission|launchable-activity)" || true
+          echo "--- signature ---"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | grep -E "Verified using|certificate DN|certificate SHA-256" || true
+
+          {
+            echo "Phone app build ${GITHUB_RUN_NUMBER}."
+            echo
+            echo "- Code: \`${short_ref}\` (${subject})"
+            echo "- Install: download \`watch-helper-${GITHUB_RUN_NUMBER}.apk\` on the phone and open it."
+            echo "- Size: ${size} bytes."
+          } > out/notes.md
+          cat out/notes.md
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: helper-file
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: Publish installable file
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # needed to create the release
+    steps:
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: helper-file
+          path: out
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="helper-${GITHUB_RUN_NUMBER}"
+          if [ "${GITHUB_RUN_ATTEMPT}" != "1" ]; then
+            tag="${tag}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          gh release create "$tag" out/watch-helper-*.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Phone app build ${GITHUB_RUN_NUMBER}" \
+            --notes-file out/notes.md \
+            --latest=false
