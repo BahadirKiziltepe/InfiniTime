@@ -29,19 +29,27 @@ namespace Pinetime {
         static constexpr int entriesPerScreen = 4;
 
         // Increment this when more space is needed
-        static constexpr int nScreens = 2;
+        static constexpr int nScreens = 4;
 
-        // Only the settings this firmware still needs. Firmware comes first because
-        // every new build has to be validated there.
+        // Firmware and Over-the-air come first because every new build needs them.
         static constexpr std::array<List::Applications, entriesPerScreen * nScreens> entries {{
           {Symbols::check, "Firmware", Apps::FirmwareValidation},
           {Symbols::shieldAlt, "Over-the-air", Apps::SettingOTA},
           {Symbols::sun, "Display", Apps::SettingDisplay},
           {Symbols::eye, "Wake Up", Apps::SettingWakeUp},
 
+          {Symbols::tachometer, "Shake Calib.", Apps::SettingShakeThreshold},
           {Symbols::clock, "Time format", Apps::SettingTimeFormat},
+          {Symbols::clock, "Date & Time", Apps::SettingSetDateTime},
+          {Symbols::clock, "Chimes", Apps::SettingChimes},
+
           {Symbols::batteryHalf, "Battery", Apps::BatteryInfo},
           {Symbols::bluetooth, "Bluetooth", Apps::SettingBluetooth},
+          {Symbols::shoe, "Steps", Apps::SettingSteps},
+          {Symbols::heartBeat, "Heartrate", Apps::SettingHeartRate},
+
+          {Symbols::cloudSunRain, "Weather", Apps::SettingWeatherFormat},
+          {Symbols::home, "Watch face", Apps::SettingWatchFace},
           {Symbols::list, "About", Apps::SysInfo},
         }};
         ScreenList<nScreens> screens;

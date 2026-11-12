@@ -17,6 +17,9 @@
 */
 #include "components/ble/MusicService.h"
 #include "components/ble/NimbleController.h"
+#include "components/ble/NotificationManager.h"
+#include "systemtask/SystemTask.h"
+#include <algorithm>
 #include <cstring>
 #include <FreeRTOS.h>
 #include <task.h>
@@ -49,6 +52,27 @@ namespace {
   constexpr ble_uuid128_t msShuffleCharUuid {CharUuid(0x0c, 0x00)};
   // Not part of stock InfiniTime: three bytes, the state of the shuffle, repeat and save buttons.
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
+  // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
+  // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is
+  // sent in pieces. The first byte of a message says what it is:
+  //   0x01 a notification starts: number (2 bytes, low byte first), hour, minute,
+  //        flags (bit 0: alert the wearer), length of the app name, the app name
+  //   0x04 the next piece of its text: the title, a 0 byte, then the message
+  //   0x05 the notification is complete: show it
+  //   0x02 take a notification back: number (2 bytes)
+  //   0x03 take all notifications back
+  //   0x10 call: state (0 none, 1 ringing, 2 in a call), then the start of the caller's name
+  //   0x11 the rest of the caller's name
+  constexpr ble_uuid128_t msPhoneCharUuid {CharUuid(0x0e, 0x00)};
+  constexpr uint8_t PhoneNotificationBegin {0x01};
+  constexpr uint8_t PhoneNotificationRemove {0x02};
+  constexpr uint8_t PhoneNotificationClear {0x03};
+  constexpr uint8_t PhoneNotificationText {0x04};
+  constexpr uint8_t PhoneNotificationEnd {0x05};
+  constexpr uint8_t PhoneCall {0x10};
+  constexpr uint8_t PhoneCallMore {0x11};
+  constexpr size_t PhoneMessageSize {20};
+  constexpr size_t PhoneBeginHeaderSize {7};
 
   constexpr uint8_t MaxStringSize {40};
 
@@ -57,7 +81,10 @@ namespace {
   }
 }
 
-Pinetime::Controllers::MusicService::MusicService(Pinetime::Controllers::NimbleController& nimble) : nimble(nimble) {
+Pinetime::Controllers::MusicService::MusicService(Pinetime::Controllers::NimbleController& nimble,
+                                                 Pinetime::System::SystemTask& systemTask,
+                                                 Pinetime::Controllers::NotificationManager& notificationManager)
+  : nimble(nimble), systemTask {systemTask}, notificationManager {notificationManager} {
   characteristicDefinition[0] = {.uuid = &msEventCharUuid.u,
                                  .access_cb = MusicCallback,
                                  .arg = this,
@@ -115,7 +142,8 @@ Pinetime::Controllers::MusicService::MusicService(Pinetime::Controllers::NimbleC
                                   .access_cb = MusicCallback,
                                   .arg = this,
                                   .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_READ};
-  characteristicDefinition[14] = {0};
+  characteristicDefinition[14] = {.uuid = &msPhoneCharUuid.u, .access_cb = MusicCallback, .arg = this, .flags = BLE_GATT_CHR_F_WRITE};
+  characteristicDefinition[15] = {0};
 
   serviceDefinition[0] = {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &msUuid.u, .characteristics = characteristicDefinition};
   serviceDefinition[1] = {0};
@@ -130,7 +158,92 @@ void Pinetime::Controllers::MusicService::Init() {
   ASSERT(res == 0);
 }
 
+int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
+  using Notifications = Pinetime::Controllers::NotificationManager;
+
+  uint8_t message[PhoneMessageSize] = {0};
+  const size_t length = std::min<size_t>(OS_MBUF_PKTLEN(om), sizeof(message));
+  if (length == 0 || os_mbuf_copydata(om, 0, length, message) != 0) {
+    return 0;
+  }
+  const auto* payload = reinterpret_cast<const char*>(&message[1]);
+  const size_t payloadLength = length - 1;
+
+  switch (message[0]) {
+    case PhoneNotificationBegin: {
+      if (length < PhoneBeginHeaderSize) {
+        break;
+      }
+      pending = {};
+      pending.category = Notifications::Categories::SimpleAlert;
+      pending.phoneId = static_cast<uint16_t>(message[1] | (message[2] << 8));
+      pending.hour = message[3];
+      pending.minute = message[4];
+      pendingAlert = (message[5] & 0x01) != 0;
+
+      const size_t labelLength = std::min<size_t>({message[6], length - PhoneBeginHeaderSize, Notifications::LabelSize});
+      std::memcpy(pending.label.data(), &message[PhoneBeginHeaderSize], labelLength);
+      pending.label[labelLength] = '\0';
+
+      pendingLength = 0;
+      pendingActive = true;
+      break;
+    }
+    case PhoneNotificationText: {
+      if (!pendingActive) {
+        break;
+      }
+      const size_t room = Notifications::MessageSize - 1 - pendingLength;
+      const size_t count = std::min(payloadLength, room);
+      std::memcpy(pending.message.data() + pendingLength, payload, count);
+      pendingLength += count;
+      break;
+    }
+    case PhoneNotificationEnd:
+      if (pendingActive && pendingLength > 0) {
+        pending.message[pendingLength] = '\0';
+        pending.size = static_cast<uint8_t>(pendingLength + 1);
+        notificationManager.Upsert(std::move(pending), pendingAlert);
+        if (pendingAlert) {
+          systemTask.PushMessage(Pinetime::System::Messages::OnNewNotification);
+        }
+      }
+      pendingActive = false;
+      break;
+    case PhoneNotificationRemove:
+      if (length >= 3) {
+        notificationManager.RemoveByPhoneId(static_cast<uint16_t>(message[1] | (message[2] << 8)));
+      }
+      break;
+    case PhoneNotificationClear:
+      notificationManager.Clear();
+      break;
+    case PhoneCall: {
+      if (length < 2 || message[1] > static_cast<uint8_t>(Notifications::CallStates::Active)) {
+        break;
+      }
+      const auto state = static_cast<Notifications::CallStates>(message[1]);
+      const bool startsRinging = state == Notifications::CallStates::Ringing &&
+                                 notificationManager.CallState() != Notifications::CallStates::Ringing;
+      notificationManager.SetCall(state, payload + 1, payloadLength - 1);
+      if (startsRinging) {
+        systemTask.PushMessage(Pinetime::System::Messages::OnNewCall);
+      }
+      break;
+    }
+    case PhoneCallMore:
+      notificationManager.AppendCaller(payload, payloadLength);
+      break;
+    default:
+      break;
+  }
+  return 0;
+}
+
 int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* ctxt) {
+  if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && ble_uuid_cmp(ctxt->chr->uuid, &msPhoneCharUuid.u) == 0) {
+    return OnPhoneMessage(ctxt->om);
+  }
   if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
     size_t notifSize = OS_MBUF_PKTLEN(ctxt->om);
     size_t bufferSize = notifSize;
@@ -221,6 +334,11 @@ int Pinetime::Controllers::MusicService::getProgress() const {
 
 int Pinetime::Controllers::MusicService::getTrackLength() const {
   return trackLength;
+}
+
+void Pinetime::Controllers::MusicService::OnDisconnect() {
+  pendingActive = false;
+  notificationManager.SetCall(Pinetime::Controllers::NotificationManager::CallStates::Idle, nullptr, 0);
 }
 
 void Pinetime::Controllers::MusicService::event(char event) {

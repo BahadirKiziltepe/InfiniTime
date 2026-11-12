@@ -3,92 +3,76 @@
 #include <lvgl/lvgl.h>
 #include <FreeRTOS.h>
 #include <cstdint>
-#include <memory>
 #include "displayapp/screens/Screen.h"
+#include "displayapp/widgets/TapPad.h"
 #include "components/ble/NotificationManager.h"
-#include "components/motor/MotorController.h"
 #include "systemtask/SystemTask.h"
 #include "systemtask/WakeLock.h"
 
 namespace Pinetime {
   namespace Controllers {
-    class AlertNotificationService;
+    class MotorController;
+    class Settings;
   }
 
   namespace Applications {
     namespace Screens {
 
+      /**
+       * The notifications the phone is showing, one at a time.
+       *
+       * - Top line: the app it came from ("Text", "WhatsApp", "Discord") and the time it arrived.
+       * - Then who it is from, the message, and at the bottom which one of how many this is.
+       * - A tap goes to the next notification, a double tap goes back. Both wrap around.
+       * - Nothing is cleared here. A notification goes away when the phone takes it back, which the
+       *   Watch Helper phone app does when it is cleared or read on the phone. Notices from the watch
+       *   itself have no phone behind them; they go once this screen has been opened and closed.
+       *
+       * In Preview mode the screen has come up by itself for a new notification. It closes again after
+       * a few seconds unless the screen is touched; from then on it behaves like the normal one.
+       */
       class Notifications : public Screen {
       public:
         enum class Modes { Normal, Preview };
-        explicit Notifications(DisplayApp* app,
-                               Pinetime::Controllers::NotificationManager& notificationManager,
-                               Pinetime::Controllers::AlertNotificationService& alertNotificationService,
-                               Pinetime::Controllers::MotorController& motorController,
-                               System::SystemTask& systemTask,
-                               Modes mode);
+        Notifications(Pinetime::Controllers::NotificationManager& notificationManager,
+                      Pinetime::Controllers::MotorController& motorController,
+                      Pinetime::Controllers::Settings& settingsController,
+                      System::SystemTask& systemTask,
+                      Modes mode);
         ~Notifications() override;
 
         void Refresh() override;
-        bool OnTouchEvent(Pinetime::Applications::TouchEvents event) override;
-        void DismissToBlack();
-        void OnPreviewInteraction();
-        void OnPreviewDismiss();
-
-        class NotificationItem {
-        public:
-          NotificationItem(Pinetime::Controllers::AlertNotificationService& alertNotificationService,
-                           Pinetime::Controllers::MotorController& motorController);
-          NotificationItem(const char* title,
-                           const char* msg,
-                           uint8_t notifNr,
-                           Controllers::NotificationManager::Categories,
-                           uint8_t notifNb,
-                           Pinetime::Controllers::AlertNotificationService& alertNotificationService,
-                           Pinetime::Controllers::MotorController& motorController);
-          ~NotificationItem();
-
-          bool IsRunning() const {
-            return running;
-          }
-
-          void OnCallButtonEvent(lv_obj_t*, lv_event_t event);
-
-        private:
-          lv_obj_t* container;
-          lv_obj_t* subject_container;
-          lv_obj_t* bt_accept;
-          lv_obj_t* bt_mute;
-          lv_obj_t* bt_reject;
-          lv_obj_t* label_accept;
-          lv_obj_t* label_mute;
-          lv_obj_t* label_reject;
-          Pinetime::Controllers::AlertNotificationService& alertNotificationService;
-          Pinetime::Controllers::MotorController& motorController;
-
-          bool running = true;
-        };
 
       private:
-        DisplayApp* app;
+        void Reload();
+        void Show();
+
         Pinetime::Controllers::NotificationManager& notificationManager;
-        Pinetime::Controllers::AlertNotificationService& alertNotificationService;
-        Pinetime::Controllers::MotorController& motorController;
+        Pinetime::Controllers::Settings& settingsController;
+        Modes mode;
         System::WakeLock wakeLock;
-        Modes mode = Modes::Normal;
-        std::unique_ptr<NotificationItem> currentItem;
-        Pinetime::Controllers::NotificationManager::Notification::Id currentId;
-        bool validDisplay = false;
-        bool afterDismissNextMessageFromAbove = false;
 
-        lv_point_t timeoutLinePoints[2] {{0, 1}, {239, 1}};
-        lv_obj_t* timeoutLine = nullptr;
-        TickType_t timeoutTickCountStart;
+        lv_obj_t* labelSource;
+        lv_obj_t* labelTime;
+        lv_obj_t* labelTitle;
+        lv_obj_t* labelBody;
+        lv_obj_t* labelCounter;
+        lv_obj_t* labelEmpty;
+        Widgets::TapPad tapPad;
 
-        static const TickType_t timeoutLength = pdMS_TO_TICKS(7000);
-        bool interacted = true;
+        // Which notification is showing: its place in the list (0 is the newest) and its id,
+        // so the screen can stay on it when the list changes around it
+        uint8_t index = 0;
+        uint8_t count = 0;
+        bool showing = false;
+        Pinetime::Controllers::NotificationManager::Notification::Id currentId = 0;
+        uint32_t shownRevision = 0;
 
-        bool dismissingNotification = false;
+        // Preview mode: when it came up, whether a touch has made it stay,
+        // and whether the tap that made it stay still has to be swallowed
+        TickType_t shownTick = 0;
+        bool pinned = false;
+        bool swallowTap = false;
 
         lv_task_t* taskRefresh;
       };

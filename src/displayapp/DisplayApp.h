@@ -139,6 +139,9 @@ namespace Pinetime {
       Utility::StaticStack<Apps, returnAppStackSize> returnAppStack;
       Utility::StaticStack<FullRefreshDirections, returnAppStackSize> appStackDirections;
 
+      // The call screen is about to come up because the phone started ringing: it should buzz
+      bool ringOnCallScreen = false;
+
       bool isDimmed = false;
 
       TickType_t CalculateSleepTime();

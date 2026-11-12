@@ -13,6 +13,7 @@ namespace Pinetime {
       FirmwareValidation,
       NotificationsPreview,
       Notifications,
+      Call,
       Timer,
       Alarm,
       FlashLight,

@@ -51,8 +51,8 @@ namespace {
   constexpr lv_coord_t buttonMargin = 3;
   constexpr lv_coord_t extraButtonHeight = 54;
 
-  // One swipe moves the phone's media volume by this many steps
-  constexpr uint8_t volumeStepsPerSwipe = 3;
+  // One swipe sends one volume event. The phone app moves the media volume a tenth of its range for it.
+  constexpr uint8_t volumeStepsPerSwipe = 1;
   // Short buzz that confirms an action
   constexpr uint8_t buzzMs = 15;
 

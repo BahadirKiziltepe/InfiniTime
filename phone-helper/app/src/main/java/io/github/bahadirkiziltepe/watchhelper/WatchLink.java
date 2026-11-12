@@ -55,6 +55,9 @@ final class WatchLink {
     void onWatchChanged();
 
     void onWatchEvent(int code);
+
+    /** Messages about notifications or calls were lost on the way. What the watch shows may be incomplete. */
+    void onPhoneMessagesLost();
   }
 
   // The watch firmware's music service (see src/components/ble/MusicService.cpp in this repo).
@@ -68,6 +71,8 @@ final class WatchLink {
   private static final UUID CH_LENGTH = musicUuid(0x07);
   /** Not in stock InfiniTime: three bytes telling the watch what shuffle, repeat and save show. */
   private static final UUID CH_BUTTONS = musicUuid(0x0d);
+  /** Notifications and calls (watch build 6 and newer). Takes the messages PhoneFrames builds. */
+  private static final UUID CH_PHONE = musicUuid(0x0e);
   // The standard Bluetooth clock service, which the watch uses to have its time set.
   private static final UUID TIME_SERVICE = UUID.fromString("00001805-0000-1000-8000-00805f9b34fb");
   private static final UUID CH_TIME = UUID.fromString("00002a2b-0000-1000-8000-00805f9b34fb");
@@ -81,7 +86,7 @@ final class WatchLink {
       ParcelUuid.fromString("0000180d-0000-1000-8000-00805f9b34fb");
 
   private static final UUID[] MUSIC =
-      {CH_EVENT, CH_STATUS, CH_ARTIST, CH_TRACK, CH_ALBUM, CH_POSITION, CH_LENGTH, CH_BUTTONS};
+      {CH_EVENT, CH_STATUS, CH_ARTIST, CH_TRACK, CH_ALBUM, CH_POSITION, CH_LENGTH, CH_BUTTONS, CH_PHONE};
   private static final UUID[] CLOCK = {CH_TIME, CH_ZONE};
   /**
    * Order in which changes are sent. The clock goes first; position last so it is as fresh as
@@ -143,6 +148,14 @@ final class WatchLink {
   private UUID inFlight;
   private byte[] inFlightValue;
   private int busyRetries;
+
+  // Notifications and calls are a string of messages that have to arrive in order, not a value
+  // that can simply be replaced by a newer one.
+  private static final int MAX_PHONE_QUEUE = 600;
+  private static final int MAX_PHONE_FAILURES = 3;
+  private final ArrayDeque<byte[]> phoneQueue = new ArrayDeque<>();
+  private int phoneFailures;
+  private int phoneSent;
 
   // Now playing, as last reported by the phone.
   private String npTitle = "";
@@ -346,6 +359,8 @@ final class WatchLink {
     inFlightValue = null;
     busyRetries = 0;
     chars.clear();
+    phoneQueue.clear();
+    phoneFailures = 0;
     // A fresh link starts from nothing: the watch may have restarted and forgotten everything.
     sent.clear();
     failed.clear();
@@ -687,6 +702,12 @@ final class WatchLink {
       byte[] value = inFlightValue;
       inFlight = null;
       inFlightValue = null;
+      if (id.equals(CH_PHONE)) {
+        onPhoneMessageDone(value, status == BluetoothGatt.GATT_SUCCESS, "code " + status);
+        listener.onWatchChanged();
+        pump();
+        return;
+      }
       if (status == BluetoothGatt.GATT_SUCCESS) {
         writesOk++;
         if (!isLive(id)) {
@@ -847,9 +868,54 @@ final class WatchLink {
     }
   }
 
+  /**
+   * Queues messages about notifications or calls (see PhoneFrames). They are sent in order, ahead
+   * of song details. Returns false if the watch is not linked or its build has no channel for them.
+   */
+  boolean sendPhone(List<byte[]> messages) {
+    if (!hasPhoneChannel()) {
+      return false;
+    }
+    if (phoneQueue.size() + messages.size() > MAX_PHONE_QUEUE) {
+      problem("too many notifications waiting to be sent; starting over");
+      phoneQueue.clear();
+      listener.onPhoneMessagesLost();
+      return false;
+    }
+    phoneQueue.addAll(messages);
+    pump();
+    return true;
+  }
+
+  /** True when a watch is linked and its build can show notifications and calls. */
+  boolean hasPhoneChannel() {
+    return ready && chars.containsKey(CH_PHONE);
+  }
+
+  private void onPhoneMessageDone(byte[] message, boolean ok, String detail) {
+    if (ok) {
+      writesOk++;
+      phoneSent++;
+      phoneFailures = 0;
+      if (phoneQueue.peek() == message) {
+        phoneQueue.poll();
+      }
+      return;
+    }
+    // One missing piece makes whatever it belonged to wrong, so drop what is waiting and let the
+    // sender start over from a clean slate.
+    writesFailed++;
+    phoneFailures++;
+    phoneQueue.clear();
+    problem("the watch did not take a notification or call message (" + detail + ")");
+    if (phoneFailures <= MAX_PHONE_FAILURES) {
+      listener.onPhoneMessagesLost();
+    }
+  }
+
   /** Values worked out at the moment of sending (clock, position) rather than remembered. */
   private static boolean isLive(UUID id) {
-    return id.equals(CH_POSITION) || id.equals(CH_TIME) || id.equals(CH_ZONE);
+    return id.equals(CH_POSITION) || id.equals(CH_TIME) || id.equals(CH_ZONE) || id.equals(CH_PHONE);
   }
 
   /** Sends the next thing the watch does not have yet. One message at a time, as Bluetooth requires. */
@@ -857,6 +923,30 @@ final class WatchLink {
     BluetoothGatt g = gatt;
     if (g == null || !ready || paused || inFlight != null) {
       return;
+    }
+    BluetoothGattCharacteristic phone = chars.get(CH_PHONE);
+    if (phone != null && !phoneQueue.isEmpty()) {
+      byte[] message = phoneQueue.peek();
+      int rc;
+      try {
+        rc = g.writeCharacteristic(phone, message, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+      } catch (RuntimeException e) {
+        rc = -1;
+      }
+      if (rc == BluetoothStatusCodes.SUCCESS) {
+        inFlight = CH_PHONE;
+        inFlightValue = message;
+        busyRetries = 0;
+        main.postDelayed(writeTimeout, WRITE_TIMEOUT_MS);
+        return;
+      }
+      if (rc == BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY && busyRetries < MAX_BUSY_RETRIES) {
+        busyRetries++;
+        main.removeCallbacks(pumpLater);
+        main.postDelayed(pumpLater, BUSY_RETRY_MS);
+        return;
+      }
+      onPhoneMessageDone(message, false, "could not send, code " + rc);
     }
     for (UUID id : SEND_ORDER) {
       BluetoothGattCharacteristic ch = chars.get(id);
@@ -948,6 +1038,12 @@ final class WatchLink {
     byte[] value = inFlightValue;
     inFlight = null;
     inFlightValue = null;
+    if (id.equals(CH_PHONE)) {
+      onPhoneMessageDone(value, false, "no answer");
+      listener.onWatchChanged();
+      pump();
+      return;
+    }
     writesFailed++;
     problem("no answer from the watch for \"" + nameOf(id) + "\"");
     if (!isLive(id) && value != null) {
@@ -1063,6 +1159,8 @@ final class WatchLink {
       }
     }
     sb.append(chars.containsKey(CH_EVENT) ? " buttons" : " (no buttons)").append('\n');
+    sb.append("Notifications and calls channel: ").append(yesNo(chars.containsKey(CH_PHONE))).append(", messages sent: ")
+        .append(phoneSent).append(", waiting: ").append(phoneQueue.size()).append('\n');
     sb.append("Clock set on this link: ").append(yesNo(clockSet)).append(", paused for an update: ")
         .append(yesNo(paused)).append(", short titles only: ").append(yesNo(shortTextOnly)).append('\n');
     sb.append("Sent to the watch: ").append(writesOk).append(" ok, ").append(writesFailed).append(" failed\n");
@@ -1129,6 +1227,9 @@ final class WatchLink {
     }
     if (CH_BUTTONS.equals(id)) {
       return "button states";
+    }
+    if (CH_PHONE.equals(id)) {
+      return "notifications and calls";
     }
     if (CH_TIME.equals(id)) {
       return "clock";

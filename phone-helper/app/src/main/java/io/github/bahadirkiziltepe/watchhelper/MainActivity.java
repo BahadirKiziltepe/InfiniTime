@@ -33,6 +33,7 @@ import java.util.List;
  */
 public class MainActivity extends Activity {
   private static final int REQUEST_BLUETOOTH = 1;
+  private static final int REQUEST_PHONE = 2;
   private static final int LOG_LINES_ON_SCREEN = 60;
 
   private Core core;
@@ -47,6 +48,8 @@ public class MainActivity extends Activity {
   private Button findButton;
   private TextView backgroundStatus;
   private View backgroundButtons;
+  private TextView phoneStatus;
+  private Button phoneButton;
   private TextView updateStatus;
   private Button installButton;
   private Button otherBuildsButton;
@@ -131,6 +134,13 @@ public class MainActivity extends Activity {
     backgroundButtons = row(button("Allow", v -> askToRunInBackground()));
     root.addView(backgroundButtons);
 
+    root.addView(heading("Notifications and calls"));
+    phoneStatus = body("");
+    root.addView(phoneStatus);
+    phoneButton = button("Allow Phone", v -> requestPermissions(
+        new String[] {Manifest.permission.ANSWER_PHONE_CALLS}, REQUEST_PHONE));
+    root.addView(row(button("Test notification", v -> core.notifications.sendTest()), phoneButton));
+
     root.addView(heading("Update watch"));
     updateStatus = body("");
     root.addView(updateStatus);
@@ -155,7 +165,7 @@ public class MainActivity extends Activity {
         button("Repeat (standard)", v -> core.spotify.standardRepeat("you"))));
 
     root.addView(heading("Watch buttons"));
-    root.addView(small("On the watch, press play/pause, next and previous, and swipe left and right for volume."));
+    root.addView(small("On the watch: tap, double tap, hold, and swipe left and right for volume."));
     eventsStatus = body("");
     root.addView(eventsStatus);
 
@@ -232,7 +242,8 @@ public class MainActivity extends Activity {
     gadgetbridgeNote.setVisibility(core.gadgetbridgeInstalled() ? View.VISIBLE : View.GONE);
 
     boolean access = core.hasNotificationAccess();
-    accessStatus.setText(access ? "✓ On" : "✗ Off. Needed to see what Spotify is playing.");
+    accessStatus.setText(access ? "✓ On"
+        : "✗ Off. Needed to see what Spotify is playing, and to pass notifications and calls on to the watch.");
     accessHint.setVisibility(access ? View.GONE : View.VISIBLE);
     accessButtons.setVisibility(access ? View.GONE : View.VISIBLE);
 
@@ -250,6 +261,9 @@ public class MainActivity extends Activity {
     backgroundStatus.setText(background ? "✓ Android will not put this app to sleep."
         : "✗ Android may put this app to sleep, and the watch would stop getting updates from the phone.");
     backgroundButtons.setVisibility(background ? View.GONE : View.VISIBLE);
+
+    phoneStatus.setText(core.notifications.describe() + "\n" + core.calls.describe());
+    phoneButton.setVisibility(core.calls.hasPhonePermission() ? View.GONE : View.VISIBLE);
 
     renderUpdater();
 

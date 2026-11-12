@@ -20,6 +20,102 @@ void NotificationManager::Push(NotificationManager::Notification&& notif) {
   if (size < notifications.size()) {
     size++;
   }
+  revision++;
+}
+
+void NotificationManager::Upsert(NotificationManager::Notification&& notif, bool alert) {
+  // An update of a notification that is already here takes its place and moves to the front
+  if (notif.phoneId != 0) {
+    for (Notification::Idx idx = 0; idx < size; idx++) {
+      if (At(idx).phoneId == notif.phoneId) {
+        DismissIdx(idx);
+        break;
+      }
+    }
+  }
+  const bool wasNew = newNotification;
+  Push(std::move(notif));
+  if (!alert) {
+    // Push marks everything as new
+    newNotification = wasNew;
+  }
+}
+
+void NotificationManager::RemoveByPhoneId(uint16_t phoneId) {
+  if (phoneId == 0) {
+    return;
+  }
+  for (Notification::Idx idx = 0; idx < size; idx++) {
+    if (At(idx).phoneId == phoneId) {
+      DismissIdx(idx);
+      break;
+    }
+  }
+  if (size == 0) {
+    newNotification = false;
+  }
+  revision++;
+}
+
+void NotificationManager::Clear() {
+  while (size > 0) {
+    DismissIdx(0);
+  }
+  newNotification = false;
+  revision++;
+}
+
+void NotificationManager::RemoveLocal() {
+  Notification::Idx idx = 0;
+  while (idx < size) {
+    if (At(idx).phoneId == 0) {
+      DismissIdx(idx);
+    } else {
+      idx++;
+    }
+  }
+  if (size == 0) {
+    newNotification = false;
+  }
+  revision++;
+}
+
+NotificationManager::Notification NotificationManager::GetAt(NotificationManager::Notification::Idx idx) const {
+  if (idx >= size) {
+    return {};
+  }
+  return At(idx);
+}
+
+void NotificationManager::SetCall(CallStates state, const char* callerName, size_t callerLength) {
+  if (callerLength > CallerSize) {
+    callerLength = CallerSize;
+  }
+  if (callerName != nullptr && callerLength > 0) {
+    std::memcpy(caller.data(), callerName, callerLength);
+  } else {
+    callerLength = 0;
+  }
+  caller[callerLength] = '\0';
+  callState = state;
+  revision++;
+}
+
+void NotificationManager::AppendCaller(const char* more, size_t moreLength) {
+  const size_t have = static_cast<size_t>(std::find(caller.begin(), caller.begin() + CallerSize, '\0') - caller.begin());
+  if (moreLength > CallerSize - have) {
+    moreLength = CallerSize - have;
+  }
+  if (more != nullptr && moreLength > 0) {
+    std::memcpy(caller.data() + have, more, moreLength);
+    caller[have + moreLength] = '\0';
+    revision++;
+  }
+}
+
+void NotificationManager::CallerName(char* out) const {
+  std::memcpy(out, caller.data(), CallerSize);
+  out[CallerSize] = '\0';
 }
 
 NotificationManager::Notification::Id NotificationManager::GetNextId() {
@@ -118,6 +214,7 @@ void NotificationManager::Dismiss(NotificationManager::Notification::Id id) {
     return;
   }
   this->DismissIdx(idx);
+  revision++;
 }
 
 bool NotificationManager::AreNewNotificationsAvailable() const {

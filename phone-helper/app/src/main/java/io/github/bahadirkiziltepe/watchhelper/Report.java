@@ -33,6 +33,12 @@ final class Report {
     sb.append("\n== Watch updates ==\n");
     sb.append(core.updater.dump());
 
+    sb.append("\n== Notifications ==\n");
+    sb.append(core.notifications.dump());
+
+    sb.append("\n== Calls ==\n");
+    sb.append(core.calls.dump());
+
     sb.append("\n== Spotify ==\n");
     sb.append(core.spotify.dump());
 

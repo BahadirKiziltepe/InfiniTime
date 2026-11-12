@@ -26,6 +26,8 @@ namespace Pinetime {
         BleRadioEnableToggle,
         // The watch was shaken while awake. Turns the screen off if the main screen is showing.
         ShakeToSleep,
+        // The phone is ringing: bring up the call screen
+        IncomingCall,
       };
     }
   }

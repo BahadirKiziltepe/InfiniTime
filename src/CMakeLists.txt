@@ -384,6 +384,7 @@ list(APPEND SOURCE_FILES
         displayapp/screens/FirmwareValidation.cpp
         displayapp/screens/ApplicationList.cpp
         displayapp/screens/Notifications.cpp
+        displayapp/screens/Call.cpp
         displayapp/screens/Twos.cpp
         displayapp/screens/HeartRate.cpp
         displayapp/screens/FlashLight.cpp
@@ -614,6 +615,8 @@ set(INCLUDE_FILES
         displayapp/screens/CheckboxList.h
         displayapp/Apps.h
         displayapp/screens/Notifications.h
+        displayapp/screens/Call.h
+        displayapp/widgets/TapPad.h
         displayapp/screens/HeartRate.h
         displayapp/screens/Metronome.h
         displayapp/screens/Motion.h

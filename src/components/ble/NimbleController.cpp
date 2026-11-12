@@ -42,7 +42,7 @@ NimbleController::NimbleController(Pinetime::System::SystemTask& systemTask,
     anService {systemTask, notificationManager},
     alertNotificationClient {systemTask, notificationManager},
     currentTimeService {dateTimeController},
-    musicService {*this},
+    musicService {*this, systemTask, notificationManager},
     weatherService {dateTimeController},
     batteryInformationService {batteryController},
     immediateAlertService {systemTask, notificationManager},
@@ -223,6 +223,7 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
 
       currentTimeClient.Reset();
       alertNotificationClient.Reset();
+      musicService.OnDisconnect();
       connectionHandle = BLE_HS_CONN_HANDLE_NONE;
       if (bleController.IsConnected()) {
         bleController.Disconnect();

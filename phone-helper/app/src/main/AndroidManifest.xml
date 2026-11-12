@@ -13,9 +13,21 @@
     <!-- Ask Android not to put the app to sleep, so the watch stays connected. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Answer or decline a ringing call when the watch asks for it. Asked for on the app's screen;
+         without it the app presses the buttons on the call notification instead. -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+
+    <!-- Turn the volume of a call up or down from the watch. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
+
+    <!-- Calls are an extra. The app is just as useful on a device without a phone in it. -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
 
     <queries>
         <!-- Read the names of the pictures on Spotify's player buttons, for the report. -->
@@ -40,7 +52,9 @@
             </intent-filter>
         </activity>
 
-        <!-- Notification access is what allows an app to see other apps' media players. -->
+        <!-- Notification access is what allows an app to see other apps' media players. It is also
+             used for what its name says: notifications from the messaging apps listed in
+             NotificationRelay, and call notifications, are passed on to the watch. -->
         <service
             android:name=".MediaListenerService"
             android:exported="true"

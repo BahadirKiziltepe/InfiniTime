@@ -26,20 +26,28 @@
 #undef max
 #undef min
 #include <FreeRTOS.h>
+#include "components/ble/NotificationManager.h"
 
 namespace Pinetime {
+  namespace System {
+    class SystemTask;
+  }
+
   namespace Controllers {
     class NimbleController;
 
     class MusicService {
     public:
-      explicit MusicService(NimbleController& nimble);
+      MusicService(NimbleController& nimble, System::SystemTask& systemTask, NotificationManager& notificationManager);
 
       void Init();
 
       int OnCommand(struct ble_gatt_access_ctxt* ctxt);
 
       void event(char event);
+
+      // The phone is gone, and with it everything the watch knew about its call
+      void OnDisconnect();
 
       std::string getArtist() const;
 
@@ -67,6 +75,12 @@ namespace Pinetime {
       static const char EVENT_MUSIC_SHUFFLE = 0x10;
       static const char EVENT_MUSIC_REPEAT = 0x11;
       static const char EVENT_MUSIC_SAVE = 0x12;
+      // Sent from the call screen. The Watch Helper phone app answers or declines the ringing call,
+      // and turns the volume of the call (not of the music) up or down.
+      static const char EVENT_CALL_ANSWER = 0x20;
+      static const char EVENT_CALL_DECLINE = 0x21;
+      static const char EVENT_CALL_VOLUP = 0x22;
+      static const char EVENT_CALL_VOLDOWN = 0x23;
 
       // What the player's shuffle, repeat and "save this song" buttons currently show, as told
       // by the phone in one three-byte write. Unknown until the phone has sent it.
@@ -95,7 +109,9 @@ namespace Pinetime {
       enum MusicStatus { NotPlaying = 0x00, Playing = 0x01 };
 
     private:
-      struct ble_gatt_chr_def characteristicDefinition[15];
+      int OnPhoneMessage(struct os_mbuf* om);
+
+      struct ble_gatt_chr_def characteristicDefinition[16];
       struct ble_gatt_svc_def serviceDefinition[2];
 
       uint16_t eventHandle {};
@@ -122,6 +138,14 @@ namespace Pinetime {
       uint8_t savedState {StateUnknown};
 
       NimbleController& nimble;
+      System::SystemTask& systemTask;
+      NotificationManager& notificationManager;
+
+      // A notification from the phone arrives in pieces. This is the one being put together.
+      NotificationManager::Notification pending {};
+      size_t pendingLength {0};
+      bool pendingActive {false};
+      bool pendingAlert {false};
     };
   }
 }

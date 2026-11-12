@@ -231,6 +231,13 @@ void SystemTask::Work() {
             displayApp.PushMessage(Pinetime::Applications::Display::Messages::NewNotification);
           }
           break;
+        case Messages::OnNewCall:
+          // The phone is ringing. Like notifications, calls stay quiet when alerts are switched off.
+          if (settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On) {
+            GoToRunning();
+            displayApp.PushMessage(Pinetime::Applications::Display::Messages::IncomingCall);
+          }
+          break;
         case Messages::SetOffAlarm:
           GoToRunning();
           displayApp.PushMessage(Pinetime::Applications::Display::Messages::AlarmTriggered);
