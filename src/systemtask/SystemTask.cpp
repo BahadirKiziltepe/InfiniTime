@@ -518,8 +518,10 @@ void SystemTask::UpdateMotion() {
 
   // Raising the wrist wakes the watch, so lowering it puts it back to sleep. The separate
   // "Lower Wrist" setting does the same on its own.
+  // Not during a call, though: then the screen stays on until the side button is pressed.
   const bool lowerMode = raiseMode || settingsController.isWakeUpModeOn(WakeUpMode::LowerWrist);
-  if (lowerMode && motionController.ShouldLowerSleep()) {
+  const bool onCall = notificationManager.CallState() != Controllers::NotificationManager::CallStates::Idle;
+  if (lowerMode && motionController.ShouldLowerSleep() && !onCall) {
     calmUpdates = 0;
     GoToSleep();
   }

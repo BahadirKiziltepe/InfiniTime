@@ -141,8 +141,6 @@ namespace Pinetime {
 
       // The call screen is about to come up because the phone started ringing: it should buzz
       bool ringOnCallScreen = false;
-      // The watch is being kept awake because the phone is ringing or in a call
-      bool awakeForCall = false;
 
       bool isDimmed = false;
 
