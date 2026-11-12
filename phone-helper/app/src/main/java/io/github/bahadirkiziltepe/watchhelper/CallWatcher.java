@@ -63,6 +63,7 @@ final class CallWatcher {
   private static final String EXTRA_CALL_TYPE = "android.callType";
   private static final String EXTRA_ANSWER = "android.answerIntent";
   private static final String EXTRA_DECLINE = "android.declineIntent";
+  private static final String EXTRA_HANG_UP = "android.hangUpIntent";
   private static final String EXTRA_CALL_PERSON = "android.callPerson";
   private static final int CALL_TYPE_INCOMING = 1;
   private static final int CALL_TYPE_ONGOING = 2;
@@ -81,6 +82,7 @@ final class CallWatcher {
     boolean ongoing;
     PendingIntent answer;
     PendingIntent decline;
+    PendingIntent hangUp;
     /** How the notification is built, without anything personal. For the report. */
     String shape;
   }
@@ -238,6 +240,7 @@ final class CallWatcher {
     try {
       note.answer = extras.getParcelable(EXTRA_ANSWER, PendingIntent.class);
       note.decline = extras.getParcelable(EXTRA_DECLINE, PendingIntent.class);
+      note.hangUp = extras.getParcelable(EXTRA_HANG_UP, PendingIntent.class);
     } catch (RuntimeException e) {
       // Not built the standard way. The buttons below are looked at instead.
     }
@@ -258,6 +261,8 @@ final class CallWatcher {
         } else if (note.decline == null && (lower.contains("decline") || lower.contains("reject")
             || lower.contains("dismiss") || lower.contains("ignore"))) {
           note.decline = action.actionIntent;
+        } else if (note.hangUp == null && (lower.contains("hang") || lower.contains("end"))) {
+          note.hangUp = action.actionIntent;
         }
       }
     }
@@ -266,7 +271,8 @@ final class CallWatcher {
     note.name = callerName(extras);
     note.shape = note.app + ", " + (callType != 0 ? "standard call notification, type " + callType : "plain notification")
         + ", buttons: " + (buttons.length() == 0 ? "none" : buttons) + ", answer " + (note.answer != null ? "yes" : "no")
-        + ", decline " + (note.decline != null ? "yes" : "no") + ", name " + (note.name.isEmpty() ? "no" : "yes");
+        + ", decline " + (note.decline != null ? "yes" : "no") + ", hang up " + (note.hangUp != null ? "yes" : "no")
+        + ", name " + (note.name.isEmpty() ? "no" : "yes");
     if (!note.shape.equals(lastShape)) {
       lastShape = note.shape;
       log.add("call", "call notification: " + note.shape);
@@ -496,8 +502,43 @@ final class CallWatcher {
     press(note, answer, what);
   }
 
+  /** Ends the call that is under way. */
+  void hangUp() {
+    String what = "hang up";
+    if (state() != PhoneFrames.CALL_ACTIVE) {
+      note("watch: " + what + ", but there is no call under way");
+      return;
+    }
+    CallNote note = ongoingNote();
+    boolean phoneCall = phoneState == TelephonyManager.CALL_STATE_OFFHOOK || note == null
+        || PHONE_APPS.contains(note.app);
+    if (phoneCall && hasPhonePermission()) {
+      try {
+        TelecomManager telecom = app.getSystemService(TelecomManager.class);
+        if (telecom != null) {
+          telecom.endCall();
+          note("watch: " + what + " (asked Android)");
+          // Same as for answering: if the call is still there in a moment, press the button too.
+          main.postDelayed(() -> {
+            CallNote still = ongoingNote();
+            if (state() == PhoneFrames.CALL_ACTIVE && still != null && still.hangUp != null) {
+              press(still.hangUp, still, what);
+            }
+          }, SECOND_TRY_MS);
+          return;
+        }
+      } catch (RuntimeException e) {
+        log.add("call", "Android would not " + what + ": " + e);
+      }
+    }
+    press(note == null ? null : note.hangUp, note, what);
+  }
+
   private void press(CallNote note, boolean answer, String what) {
-    PendingIntent button = note == null ? null : (answer ? note.answer : note.decline);
+    press(note == null ? null : (answer ? note.answer : note.decline), note, what);
+  }
+
+  private void press(PendingIntent button, CallNote note, String what) {
     if (button == null) {
       note("watch: " + what + ", but there is no way to do it: "
           + (note == null ? "no call notification was seen" : "the call notification has no such button")
@@ -540,9 +581,9 @@ final class CallWatcher {
           || device.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET)) {
         stream = STREAM_BLUETOOTH_CALL;
       }
+      // One of the phone's own steps, like its volume key during a call
       int before = audio.getStreamVolume(stream);
-      int target = VolumeSteps.next(before, audio.getStreamMinVolume(stream), audio.getStreamMaxVolume(stream), up);
-      audio.setStreamVolume(stream, target, 0);
+      audio.adjustStreamVolume(stream, up ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, 0);
       note("watch: call volume " + (up ? "up" : "down") + " (" + before + " to " + audio.getStreamVolume(stream) + " of "
           + audio.getStreamMaxVolume(stream) + ")");
     } catch (RuntimeException e) {

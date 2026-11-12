@@ -22,8 +22,9 @@ namespace Pinetime {
         HighProriotyAlert,
         InstantMessage
       };
-      // Title and text of one notification, with a '\0' between them
-      static constexpr uint8_t MessageSize {160};
+      // Title and text of one notification, with a '\0' between them. The text can hold several
+      // messages of one conversation, which is why it is this long.
+      static constexpr uint8_t MessageSize {240};
       // Name of the app a notification came from, for example "WhatsApp"
       static constexpr uint8_t LabelSize {12};
       static constexpr uint8_t UnknownHour {0xff};
@@ -60,6 +61,8 @@ namespace Pinetime {
       void Clear();
       // Notices from the watch itself have nobody to take them back. They go once they were read.
       void RemoveLocal();
+      // Position of the notification the phone numbered this way, or NbNotifications() if it is not here
+      Notification::Idx IndexOfPhoneId(uint16_t phoneId) const;
       // Notification at a position, 0 being the newest. Not valid if there is none there.
       Notification GetAt(Notification::Idx idx) const;
       // Goes up whenever the list changes, so a screen can tell that it has to look again
@@ -105,7 +108,7 @@ namespace Pinetime {
       Notification& At(Notification::Idx idx);
       void DismissIdx(Notification::Idx idx);
 
-      static constexpr uint8_t TotalNbNotifications = 8;
+      static constexpr uint8_t TotalNbNotifications = 6;
       std::array<Notification, TotalNbNotifications> notifications;
       size_t beginIdx = TotalNbNotifications - 1; // index of the newest notification
       size_t size = 0;                            // number of valid notifications in buffer

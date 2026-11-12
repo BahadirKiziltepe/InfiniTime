@@ -14,7 +14,7 @@ namespace {
   //
   //   y   4.. 29  where it came from (left) and when (right)
   //   y  32.. 57  who it is from
-  //   y  60..210  the message, six lines
+  //   y  60..210  the message, six lines at a time, with a thin scroll bar at the right when there is more
   //   y 213..238  which one this is ("2/5")
   constexpr lv_coord_t sideMargin = 6;
   constexpr lv_coord_t topRowY = 4;
@@ -22,13 +22,28 @@ namespace {
   constexpr lv_coord_t bodyY = 60;
   constexpr lv_coord_t bodyHeight = 150;
   constexpr lv_coord_t textWidth = 228;
+  constexpr lv_coord_t bodyWidth = 222;
+  constexpr lv_coord_t scrollBarWidth = 3;
+  constexpr lv_coord_t scrollBarMinHeight = 14;
+  // One swipe moves the message by four of the six lines, so two lines stay on screen to read on from
+  constexpr lv_coord_t scrollStep = 100;
+  constexpr uint16_t scrollTimeMs = 180;
 
   // A notification that came up by itself goes away again after this long, unless the screen is touched
   constexpr TickType_t previewDuration = pdMS_TO_TICKS(7000);
   // The touch that was meant for the screen before does not count
   constexpr TickType_t previewMute = pdMS_TO_TICKS(400);
 
-  constexpr uint8_t newNotificationBuzzMs = 35;
+  // The buzz for a new notification lasts 0.6 s, long enough to feel while working. The motor only
+  // runs a quarter of a second per request, so it is started again before it has run out.
+  constexpr uint8_t buzzPieceCount = 3;
+  constexpr TickType_t buzzPieceEvery = pdMS_TO_TICKS(200);
+  constexpr uint8_t buzzPieceMs = 250;
+  constexpr uint8_t buzzLastPieceMs = 200;
+
+  void SetLabelY(void* label, lv_anim_value_t y) {
+    lv_obj_set_y(static_cast<lv_obj_t*>(label), static_cast<lv_coord_t>(y));
+  }
 
   struct Source {
     const char* name;
@@ -56,7 +71,11 @@ Notifications::Notifications(Pinetime::Controllers::NotificationManager& notific
                              Pinetime::Controllers::Settings& settingsController,
                              System::SystemTask& systemTask,
                              Modes mode)
-  : notificationManager {notificationManager}, settingsController {settingsController}, mode {mode}, wakeLock(systemTask) {
+  : notificationManager {notificationManager},
+    motorController {motorController},
+    settingsController {settingsController},
+    mode {mode},
+    wakeLock(systemTask) {
 
   notificationManager.ClearNewNotificationFlag();
 
@@ -76,13 +95,28 @@ Notifications::Notifications(Pinetime::Controllers::NotificationManager& notific
   lv_label_set_text_static(labelTitle, "");
   lv_obj_align(labelTitle, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, sideMargin, titleY);
 
-  // The message. What does not fit is cut off with dots.
-  labelBody = lv_label_create(lv_scr_act(), nullptr);
+  // The message, in a window six lines high. The text is as tall as it needs to be and is moved up
+  // and down behind the window; what is outside the window is not drawn.
+  bodyBox = lv_obj_create(lv_scr_act(), nullptr);
+  lv_obj_set_style_local_bg_opa(bodyBox, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP);
+  lv_obj_set_style_local_border_width(bodyBox, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
+  lv_obj_set_size(bodyBox, bodyWidth, bodyHeight);
+  lv_obj_set_pos(bodyBox, sideMargin, bodyY);
+
+  labelBody = lv_label_create(bodyBox, nullptr);
   lv_obj_set_style_local_text_color(labelBody, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
-  lv_label_set_long_mode(labelBody, LV_LABEL_LONG_DOT);
-  lv_obj_set_size(labelBody, textWidth, bodyHeight);
+  lv_label_set_long_mode(labelBody, LV_LABEL_LONG_BREAK);
+  lv_obj_set_width(labelBody, bodyWidth);
   lv_label_set_text(labelBody, "");
-  lv_obj_align(labelBody, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, sideMargin, bodyY);
+  lv_obj_set_pos(labelBody, 0, 0);
+
+  scrollBar = lv_obj_create(lv_scr_act(), nullptr);
+  lv_obj_set_style_local_bg_color(scrollBar, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, Colors::gray);
+  lv_obj_set_style_local_border_width(scrollBar, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_radius(scrollBar, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 1);
+  lv_obj_set_size(scrollBar, scrollBarWidth, bodyHeight);
+  lv_obj_set_pos(scrollBar, LV_HOR_RES - scrollBarWidth - 2, bodyY);
+  lv_obj_set_hidden(scrollBar, true);
 
   labelCounter = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelCounter, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::gray);
@@ -102,7 +136,9 @@ Notifications::Notifications(Pinetime::Controllers::NotificationManager& notific
   if (mode == Modes::Preview) {
     wakeLock.Lock();
     tapPad.Mute(shownTick, previewMute);
-    motorController.RunForDuration(newNotificationBuzzMs);
+  } else {
+    // Opened by hand: nothing to buzz for
+    buzzPieces = buzzPieceCount;
   }
 
   Reload();
@@ -121,6 +157,12 @@ Notifications::~Notifications() {
 void Notifications::Refresh() {
   const TickType_t now = xTaskGetTickCount();
   auto tap = tapPad.Update(now);
+
+  if (buzzPieces < buzzPieceCount && (buzzPieces == 0 || (now - buzzTick) >= buzzPieceEvery)) {
+    buzzTick = now;
+    buzzPieces++;
+    motorController.RunForDuration(buzzPieces < buzzPieceCount ? buzzPieceMs : buzzLastPieceMs);
+  }
 
   if (mode == Modes::Preview && !pinned) {
     if (tapPad.TakeTouched()) {
@@ -175,7 +217,11 @@ void Notifications::Reload() {
   }
 
   // Stay on the notification that was showing, if it is still there
-  const auto position = showing ? notificationManager.IndexOf(currentId) : count;
+  auto position = showing ? notificationManager.IndexOf(currentId) : count;
+  if (position >= count && showing) {
+    // A conversation that got another message comes back as a new entry with the same phone number
+    position = notificationManager.IndexOfPhoneId(currentPhoneId);
+  }
   if (position < count) {
     index = position;
   } else if (index >= count) {
@@ -192,13 +238,16 @@ void Notifications::Show() {
   lv_obj_set_hidden(labelSource, empty);
   lv_obj_set_hidden(labelTime, empty);
   lv_obj_set_hidden(labelTitle, empty);
-  lv_obj_set_hidden(labelBody, empty);
+  lv_obj_set_hidden(bodyBox, empty);
   lv_obj_set_hidden(labelCounter, empty);
   showing = !empty;
   if (empty) {
+    scrollMax = 0;
+    ScrollTo(0, false);
     return;
   }
   currentId = notification.id;
+  currentPhoneId = notification.phoneId;
 
   const char* source = notification.label[0] != '\0' ? notification.label.data() : "Notice";
   lv_obj_set_style_local_text_color(labelSource, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, ColorOf(source));
@@ -219,8 +268,87 @@ void Notifications::Show() {
 
   const char* title = notification.Title();
   lv_label_set_text(labelTitle, title != nullptr ? title : "");
-  lv_label_set_text(labelBody, notification.Message());
+  const char* message = notification.Message();
+  lv_label_set_text(labelBody, message);
+  const lv_coord_t textHeight = lv_obj_get_height(labelBody);
+  scrollMax = textHeight > bodyHeight ? textHeight - bodyHeight : 0;
+
+  // A conversation's messages come oldest first, with an empty line between them. Open at the newest
+  // one, the way a chat does: its first line at the top of the window, or the end of the text if
+  // what follows does not fill the window. The older ones are a swipe down away.
+  lv_coord_t start = 0;
+  const char* newest = nullptr;
+  for (const char* at = message; *at != '\0'; at++) {
+    if (at[0] == '\n' && at[1] == '\n' && at[2] != '\0') {
+      newest = at + 2;
+    }
+  }
+  if (newest != nullptr) {
+    // The label counts letters, not bytes
+    uint32_t letters = 0;
+    for (const char* at = message; at < newest; at++) {
+      if ((*at & 0xC0) != 0x80) {
+        letters++;
+      }
+    }
+    lv_point_t position;
+    lv_label_get_letter_pos(labelBody, letters, &position);
+    start = position.y;
+  }
+  ScrollTo(start < scrollMax ? start : scrollMax, false);
 
   lv_label_set_text_fmt(labelCounter, "%d/%d", index + 1, count);
   lv_obj_realign(labelCounter);
+}
+
+void Notifications::ScrollTo(lv_coord_t offset, bool animate) {
+  lv_anim_del(labelBody, nullptr);
+  if (animate) {
+    lv_anim_t slide;
+    lv_anim_init(&slide);
+    lv_anim_set_var(&slide, labelBody);
+    lv_anim_set_exec_cb(&slide, SetLabelY);
+    lv_anim_set_values(&slide, -scrollOffset, -offset);
+    lv_anim_set_time(&slide, scrollTimeMs);
+    lv_anim_start(&slide);
+  } else {
+    lv_obj_set_y(labelBody, -offset);
+  }
+  scrollOffset = offset;
+
+  // The bar shows how much of the message the window covers, and where in it the window is
+  if (scrollMax <= 0) {
+    lv_obj_set_hidden(scrollBar, true);
+    return;
+  }
+  lv_coord_t barHeight = static_cast<lv_coord_t>((bodyHeight * bodyHeight) / (bodyHeight + scrollMax));
+  if (barHeight < scrollBarMinHeight) {
+    barHeight = scrollBarMinHeight;
+  }
+  const lv_coord_t barY = static_cast<lv_coord_t>(bodyY + ((bodyHeight - barHeight) * scrollOffset) / scrollMax);
+  lv_obj_set_height(scrollBar, barHeight);
+  lv_obj_set_y(scrollBar, barY);
+  lv_obj_set_hidden(scrollBar, false);
+}
+
+bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
+  switch (event) {
+    case TouchEvents::SwipeUp:
+      // Read on. With nothing further down, the swipe does nothing.
+      if (scrollOffset < scrollMax) {
+        const lv_coord_t next = scrollOffset + scrollStep;
+        ScrollTo(next < scrollMax ? next : scrollMax, true);
+      }
+      return true;
+    case TouchEvents::SwipeDown:
+      if (scrollOffset > 0) {
+        const lv_coord_t previous = scrollOffset - scrollStep;
+        ScrollTo(previous > 0 ? previous : 0, true);
+        return true;
+      }
+      // Already at the top: the swipe leaves the screen
+      return false;
+    default:
+      return false;
+  }
 }

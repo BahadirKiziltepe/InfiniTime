@@ -1,5 +1,6 @@
 package io.github.bahadirkiziltepe.watchhelper;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,8 +20,13 @@ final class PhoneFrames {
   /** What the watch keeps: the app's name, who it is from, and title plus text together. */
   static final int MAX_LABEL = 12;
   static final int MAX_TITLE = 40;
-  static final int MAX_TEXT = 159;
+  static final int MAX_TEXT = 239;
   static final int MAX_CALLER = 40;
+
+  /** Between two messages of one conversation. The watch shows it as an empty line. */
+  private static final byte[] BETWEEN = {'\n', '\n'};
+  /** Stands in for older messages that there was no room for. */
+  private static final byte[] EARLIER = "...".getBytes(StandardCharsets.UTF_8);
 
   static final int CALL_NONE = 0;
   static final int CALL_RINGING = 1;
@@ -39,12 +45,14 @@ final class PhoneFrames {
 
   /**
    * A notification, new or changed. {@code id} is this app's number for it (1 to 65535), used
-   * again to take it back. {@code alert} makes the watch buzz and show it.
+   * again to take it back. {@code alert} makes the watch buzz and show it. {@code messages} are
+   * the conversation's unread messages, oldest first; when they do not all fit, the newest win.
    */
-  static List<byte[]> add(int id, int hour, int minute, boolean alert, String label, String title, String body) {
+  static List<byte[]> add(int id, int hour, int minute, boolean alert, String label, String title,
+      List<String> messages) {
     byte[] labelBytes = WatchText.encode(label, MAX_LABEL);
     byte[] titleBytes = WatchText.encode(title, MAX_TITLE);
-    byte[] bodyBytes = WatchText.encode(body, MAX_TEXT - 1 - titleBytes.length);
+    byte[] bodyBytes = body(messages, MAX_TEXT - 1 - titleBytes.length);
 
     List<byte[]> out = new ArrayList<>();
     byte[] begin = new byte[7 + labelBytes.length];
@@ -58,13 +66,61 @@ final class PhoneFrames {
     System.arraycopy(labelBytes, 0, begin, 7, labelBytes.length);
     out.add(begin);
 
-    // Title, a zero byte, then the message: the watch splits them at the zero.
+    // Title, a zero byte, then the messages: the watch splits them at the zero.
     byte[] text = new byte[titleBytes.length + 1 + bodyBytes.length];
     System.arraycopy(titleBytes, 0, text, 0, titleBytes.length);
     System.arraycopy(bodyBytes, 0, text, titleBytes.length + 1, bodyBytes.length);
     addPieces(out, TEXT, text, 0);
 
     out.add(new byte[] {(byte) END});
+    return out;
+  }
+
+  /**
+   * The messages one under the other with an empty line between them, in at most {@code budget}
+   * bytes. Starting from the newest, as many whole messages as fit are kept; "..." on top says
+   * that there are older ones on the phone. A single message that is too long is cut short.
+   */
+  static byte[] body(List<String> messages, int budget) {
+    List<byte[]> kept = new ArrayList<>();
+    int used = 0;
+    boolean dropped = false;
+    for (int i = messages.size() - 1; i >= 0; i--) {
+      byte[] message = WatchText.fold(messages.get(i)).getBytes(StandardCharsets.UTF_8);
+      if (message.length == 0) {
+        continue;
+      }
+      int needed = message.length + (kept.isEmpty() ? 0 : BETWEEN.length);
+      if (used + needed > budget) {
+        if (kept.isEmpty()) {
+          // Even the newest one alone is too long
+          message = WatchText.encode(messages.get(i), budget);
+          kept.add(message);
+          used = message.length;
+          dropped = i > 0;
+        } else {
+          dropped = true;
+        }
+        break;
+      }
+      kept.add(0, message);
+      used += needed;
+    }
+    if (dropped && used + EARLIER.length + BETWEEN.length <= budget) {
+      kept.add(0, EARLIER);
+      used += EARLIER.length + BETWEEN.length;
+    }
+
+    byte[] out = new byte[used];
+    int at = 0;
+    for (int i = 0; i < kept.size(); i++) {
+      if (i > 0) {
+        System.arraycopy(BETWEEN, 0, out, at, BETWEEN.length);
+        at += BETWEEN.length;
+      }
+      System.arraycopy(kept.get(i), 0, out, at, kept.get(i).length);
+      at += kept.get(i).length;
+    }
     return out;
   }
 

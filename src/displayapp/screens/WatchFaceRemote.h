@@ -7,7 +7,6 @@
 #include <string>
 #include "displayapp/Controllers.h"
 #include "displayapp/apps/Apps.h"
-#include "displayapp/screens/BatteryIcon.h"
 #include "displayapp/screens/Screen.h"
 #include "components/datetime/DateTimeController.h"
 #include "utility/DirtyValue.h"
@@ -28,7 +27,8 @@ namespace Pinetime {
       /**
        * Main screen: a music remote with the clock in the top left corner.
        *
-       * - Top bar: time on the left, battery level as a number on the right.
+       * - Top bar: time on the left. On the right the battery as plain numbers, the phone's and then the
+       *   watch's ("55|95"), and under them the phone's media volume in the phone's own steps.
        * - Below it: track, artist and a progress bar.
        * - No playback buttons. The screen itself is the button:
        *   tap = play or pause, double tap = next track, tap and hold = previous track.
@@ -57,7 +57,7 @@ namespace Pinetime {
 
       private:
         void ChangeVolume(bool up);
-        void UpdateBattery();
+        void UpdateLevels();
         void UpdateMusic(TickType_t now);
         void UpdateExtraButtons(TickType_t now);
         void UpdateTaps(TickType_t now);
@@ -70,13 +70,10 @@ namespace Pinetime {
 
         Utility::DirtyValue<std::chrono::time_point<std::chrono::system_clock, std::chrono::minutes>> currentDateTime {};
         Utility::DirtyValue<bool> notificationState {};
-        Utility::DirtyValue<uint8_t> batteryPercent {};
-        Utility::DirtyValue<bool> powerPresent {};
 
         lv_obj_t* labelTime;
         lv_obj_t* labelAmPm;
         lv_obj_t* labelBattery;
-        lv_obj_t* labelPlug;
         lv_obj_t* notificationIcon;
         lv_obj_t* labelVolume;
         lv_obj_t* labelTrack;
@@ -92,7 +89,6 @@ namespace Pinetime {
         lv_obj_t* labelRepeat;
 
         lv_style_t extraBtnStyle;
-        BatteryIcon batteryIcon;
 
         Controllers::DateTime& dateTimeController;
         const Controllers::Battery& batteryController;
@@ -122,8 +118,10 @@ namespace Pinetime {
         bool skipHintForward = false;
         TickType_t skipHintTick = 0;
 
-        bool volumeHintVisible = false;
-        TickType_t volumeHintTick = 0;
+        /** What the top right corner shows. Starts at a value nothing uses, so the first update draws it. */
+        uint8_t shownWatchBattery = 0xfe;
+        uint8_t shownPhoneBattery = 0xfe;
+        uint8_t shownVolume = 0xfe;
 
         /** Touch pad: a finger is down on it, and whether this press can still become a tap or a hold */
         bool fingerDown = false;

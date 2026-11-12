@@ -18,8 +18,10 @@ namespace {
 
   constexpr lv_color_t callColor = LV_COLOR_MAKE(0x1e, 0xd7, 0x60);
 
-  // Keeping the finger down this long declines the call
+  // Keeping the finger down this long declines a ringing call
   constexpr TickType_t holdDuration = pdMS_TO_TICKS(600);
+  // Ending a call that is under way takes a longer hold, so it does not happen by accident
+  constexpr TickType_t hangUpHoldDuration = pdMS_TO_TICKS(1000);
   // The screen came up by itself. A touch that was on its way to the screen before does not answer the call.
   constexpr TickType_t appearMute = pdMS_TO_TICKS(700);
   // If the phone has not reported the call answered or gone this long after being asked, show it ringing again
@@ -117,12 +119,14 @@ void Call::Refresh() {
     return;
   }
 
-  if (state != CallStates::Ringing) {
+  if ((state == CallStates::Ringing) == (action == Actions::Ending)) {
+    // Answered, or ringing again: what was asked for belonged to the other state
     action = Actions::None;
   } else if (action != Actions::None && (now - actionTick) >= actionTimeout) {
-    // The phone did not do it. The call is still ringing.
+    // The phone did not do it. The call is as it was.
     action = Actions::None;
   }
+  tapPad.SetHoldDuration(state == CallStates::Ringing ? holdDuration : hangUpHoldDuration);
 
   if (state == CallStates::Ringing && action == Actions::None) {
     if (tap == Widgets::TapPad::Events::Tap) {
@@ -138,6 +142,11 @@ void Call::Refresh() {
       StopBuzz();
       motorController.RunForDuration(confirmBuzzMs);
     }
+  } else if (state == CallStates::Active && action == Actions::None && tap == Widgets::TapPad::Events::Hold) {
+    musicService.event(Controllers::MusicService::EVENT_CALL_HANGUP);
+    action = Actions::Ending;
+    actionTick = now;
+    motorController.RunForDuration(confirmBuzzMs);
   }
 
   if (buzzing) {
@@ -180,9 +189,12 @@ void Call::Draw(CallStates state) {
       lv_label_set_text_static(labelState, "Incoming call");
       lv_label_set_text_static(labelHint, "Tap: answer\nHold: decline");
     }
+  } else if (action == Actions::Ending) {
+    lv_label_set_text_static(labelState, "Hanging up...");
+    lv_label_set_text_static(labelHint, "");
   } else {
     lv_label_set_text_static(labelState, "On a call");
-    lv_label_set_text_static(labelHint, "Swipe left or right\nfor call volume");
+    lv_label_set_text_static(labelHint, "Swipe: call volume\nHold: hang up");
   }
   lv_obj_realign(labelState);
   lv_obj_realign(labelHint);

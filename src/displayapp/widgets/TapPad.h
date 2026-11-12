@@ -40,6 +40,10 @@ namespace Pinetime {
           lv_obj_set_event_cb(pad, EventHandler);
         }
 
+        void SetHoldDuration(TickType_t duration) {
+          holdDuration = duration;
+        }
+
         /** Touches that begin within this time from now are ignored */
         void Mute(TickType_t now, TickType_t duration) {
           muted = true;

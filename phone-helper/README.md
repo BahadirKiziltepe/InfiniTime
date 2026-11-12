@@ -41,4 +41,4 @@ with JDK 17, Gradle 8.10+ and the Android SDK (platform 35, build-tools 35.0.0).
 | `NotificationRelay.java` | Decides which notifications go to the watch and when they are taken back |
 | `CallWatcher.java` | Follows the phone's call, and answers or declines for the watch |
 | `MainActivity.java`, `Report.java` | The one screen, and the report |
-| `WatchText.java`, `WatchTime.java`, `ActionPicker.java`, `PhoneFrames.java`, `VolumeSteps.java` | Small pure helpers |
+| `WatchText.java`, `WatchTime.java`, `ActionPicker.java`, `PhoneFrames.java` | Small pure helpers |

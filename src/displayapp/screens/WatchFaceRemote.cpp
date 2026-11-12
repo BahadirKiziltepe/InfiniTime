@@ -19,7 +19,7 @@ using namespace Pinetime::Applications::Screens;
 namespace {
   // Layout of the 240x240 screen.
   //
-  //   y   0.. 46  top bar: time (left), battery level (right), markers under it
+  //   y   0.. 46  top bar: time (left); phone and watch battery (right) with the volume under them
   //   y  66.. 90  track
   //   y  96..120  artist
   //   y 134..154  what a tap will do (play or pause), and the position in the track
@@ -36,9 +36,7 @@ namespace {
   constexpr lv_coord_t artistOffsetY = -12;
   constexpr lv_coord_t playerOffsetY = 24;
 
-  // Top bar, right: the battery icon (or the plug) sits in the corner, the number ends left of it
-  constexpr lv_coord_t batteryIconSlot = 20;
-  // Second line of the top bar, under the battery level
+  // Second line of the top bar, under the battery numbers
   constexpr lv_coord_t markerOffsetY = 24;
 
   constexpr lv_coord_t textWidth = 232;
@@ -51,14 +49,13 @@ namespace {
   constexpr lv_coord_t buttonMargin = 3;
   constexpr lv_coord_t extraButtonHeight = 54;
 
-  // One swipe sends one volume event. The phone app moves the media volume a tenth of its range for it.
+  // One swipe sends one volume event. The phone app moves the media volume one of the phone's own steps for it.
   constexpr uint8_t volumeStepsPerSwipe = 1;
   // Short buzz that confirms an action
   constexpr uint8_t buzzMs = 15;
 
   constexpr TickType_t musicPollPeriod = pdMS_TO_TICKS(500);
   constexpr TickType_t playOverrideDuration = pdMS_TO_TICKS(2500);
-  constexpr TickType_t volumeHintDuration = pdMS_TO_TICKS(900);
   constexpr TickType_t skipHintDuration = pdMS_TO_TICKS(700);
 
   // A second tap makes a double tap if it starts within this time after the first one ended.
@@ -126,7 +123,6 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
                                  Controllers::MotorController& motorController,
                                  Controllers::MusicService& musicService)
   : currentDateTime {{}},
-    batteryIcon(true),
     dateTimeController {dateTimeController},
     batteryController {batteryController},
     bleController {bleController},
@@ -135,19 +131,12 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
     motorController {motorController},
     musicService {musicService} {
 
-  // Top bar, right: the battery level as a number, then the battery icon, or a plug while on the charger.
-  // Under them: the new-notification marker and the volume hint.
-  batteryIcon.Create(lv_scr_act());
-  lv_obj_align(batteryIcon.GetObject(), lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -2, 1);
-
-  labelPlug = lv_label_create(lv_scr_act(), nullptr);
-  lv_label_set_text_static(labelPlug, Symbols::plug);
-  lv_obj_align(labelPlug, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -1, 0);
-  lv_obj_set_hidden(labelPlug, true);
-
+  // Top bar, right: battery as plain numbers, the phone's and then the watch's ("55|95"), or the
+  // watch's alone while the phone has not said. Under it, in orange, the phone's media volume in
+  // the phone's own steps, and left of that the new-notification marker.
   labelBattery = lv_label_create(lv_scr_act(), nullptr);
   lv_label_set_text_static(labelBattery, "");
-  lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -batteryIconSlot, 0);
+  lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, 0, 0);
 
   notificationIcon = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(notificationIcon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_LIME);
@@ -156,9 +145,8 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
 
   labelVolume = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelVolume, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::orange);
-  lv_label_set_text_static(labelVolume, Symbols::volumUp);
+  lv_label_set_text_static(labelVolume, "");
   lv_obj_align(labelVolume, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, markerOffsetY);
-  lv_obj_set_hidden(labelVolume, true);
 
   // Top bar, left: the time, with AM/PM next to it in 12-hour mode
   labelTime = lv_label_create(lv_scr_act(), nullptr);
@@ -169,7 +157,7 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   labelAmPm = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelAmPm, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
   lv_label_set_text_static(labelAmPm, "");
-  lv_obj_align(labelAmPm, labelTime, LV_ALIGN_OUT_RIGHT_MID, 6, 6);
+  lv_obj_align(labelAmPm, labelTime, LV_ALIGN_OUT_RIGHT_MID, 0, 6);
 
   // Track and artist. Text that does not fit scrolls.
   labelTrack = lv_label_create(lv_scr_act(), nullptr);
@@ -253,7 +241,7 @@ void WatchFaceRemote::Refresh() {
   const TickType_t now = xTaskGetTickCount();
   NoteScreenOn(now);
   UpdateTaps(now);
-  UpdateBattery();
+  UpdateLevels();
 
   notificationState = notificationManager.AreNewNotificationsAvailable();
   if (notificationState.IsUpdated()) {
@@ -282,11 +270,6 @@ void WatchFaceRemote::Refresh() {
     lv_obj_realign(labelAmPm);
   }
 
-  if (volumeHintVisible && (now - volumeHintTick) >= volumeHintDuration) {
-    lv_obj_set_hidden(labelVolume, true);
-    volumeHintVisible = false;
-  }
-
   if (skipHintVisible && (now - skipHintTick) >= skipHintDuration) {
     skipHintVisible = false;
     ShowPlayerIcon();
@@ -299,20 +282,34 @@ void WatchFaceRemote::Refresh() {
   }
 }
 
-void WatchFaceRemote::UpdateBattery() {
-  batteryPercent = batteryController.PercentRemaining();
-  if (batteryPercent.IsUpdated()) {
-    const uint8_t percent = batteryPercent.Get();
-    batteryIcon.SetBatteryPercentage(percent);
-    lv_label_set_text_fmt(labelBattery, "%d%%", percent);
+void WatchFaceRemote::UpdateLevels() {
+  using Music = Controllers::MusicService;
+
+  // What the phone said last is only worth showing while the phone is still there
+  const bool connected = bleController.IsConnected();
+  const uint8_t watchBattery = batteryController.PercentRemaining();
+  const uint8_t phoneBattery = connected ? musicService.getPhoneBattery() : Music::StateUnknown;
+  if (watchBattery != shownWatchBattery || phoneBattery != shownPhoneBattery) {
+    shownWatchBattery = watchBattery;
+    shownPhoneBattery = phoneBattery;
+    if (phoneBattery <= 100) {
+      lv_label_set_text_fmt(labelBattery, "%d|%d", phoneBattery, watchBattery);
+    } else {
+      lv_label_set_text_fmt(labelBattery, "%d", watchBattery);
+    }
     lv_obj_realign(labelBattery);
   }
 
-  powerPresent = batteryController.IsPowerPresent();
-  if (powerPresent.IsUpdated()) {
-    const bool plugged = powerPresent.Get();
-    lv_obj_set_hidden(batteryIcon.GetObject(), plugged);
-    lv_obj_set_hidden(labelPlug, !plugged);
+  // The number is the phone's own, so it also follows the phone's volume keys
+  const uint8_t volume = connected ? musicService.getPhoneVolume() : Music::StateUnknown;
+  if (volume != shownVolume) {
+    shownVolume = volume;
+    if (volume == Music::StateUnknown) {
+      lv_label_set_text_static(labelVolume, "");
+    } else {
+      lv_label_set_text_fmt(labelVolume, "%d", volume);
+    }
+    lv_obj_realign(labelVolume);
   }
 }
 
@@ -587,12 +584,6 @@ void WatchFaceRemote::ChangeVolume(bool up) {
     }
     motorController.RunForDuration(buzzMs);
   }
-
-  lv_label_set_text_static(labelVolume, up ? Symbols::volumUp : Symbols::volumDown);
-  lv_obj_set_hidden(labelVolume, false);
-  lv_obj_realign(labelVolume);
-  volumeHintVisible = true;
-  volumeHintTick = xTaskGetTickCount();
 }
 
 bool WatchFaceRemote::OnTouchEvent(Pinetime::Applications::TouchEvents event) {

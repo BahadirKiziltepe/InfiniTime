@@ -80,6 +80,17 @@ void NotificationManager::RemoveLocal() {
   revision++;
 }
 
+NotificationManager::Notification::Idx NotificationManager::IndexOfPhoneId(uint16_t phoneId) const {
+  if (phoneId != 0) {
+    for (Notification::Idx idx = 0; idx < size; idx++) {
+      if (At(idx).phoneId == phoneId) {
+        return idx;
+      }
+    }
+  }
+  return size;
+}
+
 NotificationManager::Notification NotificationManager::GetAt(NotificationManager::Notification::Idx idx) const {
   if (idx >= size) {
     return {};

@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,7 +41,9 @@ final class NotificationRelay {
   }
 
   /** How many notifications the watch holds. Older ones wait on the phone until there is room. */
-  private static final int WATCH_KEEPS = 8;
+  private static final int WATCH_KEEPS = 6;
+  /** A conversation's notification can list a long history. Only this many of the newest matter. */
+  private static final int MAX_MESSAGES = 12;
   /** Apps often take a notification away and put the same one straight back. That is not news. */
   private static final long REPOST_QUIET_MS = 3_000;
   private static final long REFILL_DELAY_MS = 1_500;
@@ -52,7 +55,8 @@ final class NotificationRelay {
     int id;
     String label;
     String title;
-    String body;
+    /** The conversation's unread messages, oldest first, each as the watch should show it. */
+    List<String> messages;
     int hour;
     int minute;
     /** Everything that makes this notification what it is. Two with the same signature are the same. */
@@ -133,8 +137,13 @@ final class NotificationRelay {
     shown.put(key, fresh);
     trim();
     send(fresh, alert);
+    int characters = 0;
+    for (String message : fresh.messages) {
+      characters += message.length();
+    }
     log.add("notify", label + " notification sent to the watch" + (alert ? "" : " (quietly)") + ": name "
-        + fresh.title.length() + ", text " + fresh.body.length() + " characters");
+        + fresh.title.length() + " characters, " + fresh.messages.size() + " message(s) of " + characters
+        + " characters in all");
   }
 
   void onRemoved(StatusBarNotification sbn) {
@@ -216,7 +225,7 @@ final class NotificationRelay {
 
   private void send(Entry entry, boolean alert) {
     if (watch.sendPhone(PhoneFrames.add(entry.id, entry.hour, entry.minute, alert, entry.label, entry.title,
-        entry.body))) {
+        entry.messages))) {
       sentCount++;
       if (alert) {
         alertCount++;
@@ -249,9 +258,11 @@ final class NotificationRelay {
       return;
     }
     ZonedDateTime now = ZonedDateTime.now();
-    watch.sendPhone(PhoneFrames.add(TEST_ID, now.getHour(), now.getMinute(), true, "Text", "Watch Helper",
-        "This is a test. Tap to go on to the next notification, double tap to go back. It goes away by itself "
-            + "in a minute."));
+    List<String> messages = new ArrayList<>();
+    messages.add("This is a test with three messages in it. Swipe up to read on, swipe down to come back.");
+    messages.add("Tap goes on to the next notification, double tap goes back.");
+    messages.add("It goes away by itself in a minute.");
+    watch.sendPhone(PhoneFrames.add(TEST_ID, now.getHour(), now.getMinute(), true, "Text", "Watch Helper", messages));
     testShowing = true;
     log.add("notify", "test notification sent to the watch");
     main.removeCallbacks(endTest);
@@ -286,58 +297,86 @@ final class NotificationRelay {
     }
     Bundle extras = n.extras;
     String title = text(extras.getCharSequence(Notification.EXTRA_TITLE));
-    String body = text(extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
-    if (body.isEmpty()) {
-      body = text(extras.getCharSequence(Notification.EXTRA_TEXT));
+    String plain = text(extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
+    if (plain.isEmpty()) {
+      plain = text(extras.getCharSequence(Notification.EXTRA_TEXT));
     }
     long when = n.when > 0 ? n.when : sbn.getPostTime();
 
-    // A chat notification lists its messages. The newest one is the news, with who wrote it.
+    // A chat notification lists the conversation's unread messages, each with who wrote it.
+    List<String> messages = new ArrayList<>();
     try {
-      Parcelable[] messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES, Parcelable.class);
-      for (int i = messages == null ? -1 : messages.length - 1; i >= 0; i--) {
-        if (!(messages[i] instanceof Bundle)) {
+      Parcelable[] listed = extras.getParcelableArray(Notification.EXTRA_MESSAGES, Parcelable.class);
+      String conversation = text(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
+      boolean group = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) || !conversation.isEmpty();
+
+      List<String> words = new ArrayList<>();
+      List<String> senders = new ArrayList<>();
+      boolean anySender = false;
+      for (int i = listed == null ? -1 : listed.length - 1; i >= 0 && words.size() < MAX_MESSAGES; i--) {
+        if (!(listed[i] instanceof Bundle)) {
           continue;
         }
-        Bundle message = (Bundle) messages[i];
-        String words = text(message.getCharSequence("text"));
+        Bundle message = (Bundle) listed[i];
+        String said = text(message.getCharSequence("text"));
+        if (said.isEmpty()) {
+          continue;
+        }
         if (words.isEmpty()) {
-          continue;
-        }
-        body = words;
-        long time = message.getLong("time", 0);
-        if (time > 0) {
-          when = time;
+          long time = message.getLong("time", 0);
+          if (time > 0) {
+            when = time;
+          }
         }
         String sender = text(message.getCharSequence("sender"));
         Person person = message.getParcelable("sender_person", Person.class);
         if (person != null && person.getName() != null) {
           sender = text(person.getName());
         }
-        String conversation = text(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
-        boolean group = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false);
+        anySender |= !sender.isEmpty();
+        words.add(said);
+        senders.add(sender);
+      }
+      // Collected newest first; the watch wants them oldest first.
+      Collections.reverse(words);
+      Collections.reverse(senders);
+
+      if (!words.isEmpty()) {
+        String newestSender = senders.get(senders.size() - 1);
         if (group && !conversation.isEmpty()) {
-          title = sender.isEmpty() ? conversation : sender + " @ " + conversation;
-        } else if (!sender.isEmpty()) {
-          title = sender;
+          title = conversation;
+        } else if (!newestSender.isEmpty()) {
+          title = newestSender;
         }
-        break;
+        String before = null;
+        for (int i = 0; i < words.size(); i++) {
+          // A message without a sender is one the phone's owner wrote, as long as the app names senders at all.
+          String sender = senders.get(i).isEmpty() && anySender ? "You" : senders.get(i);
+          boolean say = !sender.isEmpty() && !sender.equals(before) && (group || sender.equals("You")
+              || "You".equals(before));
+          messages.add(say ? sender + ": " + words.get(i) : words.get(i));
+          before = sender;
+        }
       }
     } catch (RuntimeException e) {
       // Not laid out as expected. The plain title and text read above still stand.
+      messages.clear();
     }
 
-    if (body.isEmpty()) {
-      return skip("no text");
+    if (messages.isEmpty()) {
+      if (plain.isEmpty()) {
+        return skip("no text");
+      }
+      messages.add(plain);
     }
     Entry entry = new Entry();
     entry.label = label;
     entry.title = title;
-    entry.body = body;
+    entry.messages = messages;
     ZonedDateTime at = Instant.ofEpochMilli(when).atZone(ZoneId.systemDefault());
     entry.hour = at.getHour();
     entry.minute = at.getMinute();
-    entry.signature = title + '\n' + body + '\n' + when;
+    entry.signature = title + '\n' + String.join("\n", messages) + '\n' + when;
     return entry;
   }
 

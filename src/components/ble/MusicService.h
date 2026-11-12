@@ -81,6 +81,7 @@ namespace Pinetime {
       static const char EVENT_CALL_DECLINE = 0x21;
       static const char EVENT_CALL_VOLUP = 0x22;
       static const char EVENT_CALL_VOLDOWN = 0x23;
+      static const char EVENT_CALL_HANGUP = 0x24;
 
       // What the player's shuffle, repeat and "save this song" buttons currently show, as told
       // by the phone in one three-byte write. Unknown until the phone has sent it.
@@ -104,6 +105,20 @@ namespace Pinetime {
 
       uint8_t getSavedState() const {
         return savedState;
+      }
+
+      // The phone's media volume in the phone's own steps, how many steps there are, and the
+      // phone's battery in percent. StateUnknown until the phone app has sent them.
+      uint8_t getPhoneVolume() const {
+        return phoneVolume;
+      }
+
+      uint8_t getPhoneVolumeMax() const {
+        return phoneVolumeMax;
+      }
+
+      uint8_t getPhoneBattery() const {
+        return phoneBattery;
       }
 
       enum MusicStatus { NotPlaying = 0x00, Playing = 0x01 };
@@ -136,6 +151,9 @@ namespace Pinetime {
       uint8_t shuffleState {StateUnknown};
       uint8_t repeatState {StateUnknown};
       uint8_t savedState {StateUnknown};
+      uint8_t phoneVolume {StateUnknown};
+      uint8_t phoneVolumeMax {StateUnknown};
+      uint8_t phoneBattery {StateUnknown};
 
       NimbleController& nimble;
       System::SystemTask& systemTask;

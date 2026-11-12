@@ -149,6 +149,15 @@ final class WatchLink {
   private byte[] inFlightValue;
   private int busyRetries;
 
+  // What the player's buttons show, and the phone's volume and battery. 0xff stands for "not known".
+  private static final int UNKNOWN_BYTE = 0xff;
+  private int stateShuffle = UNKNOWN_BYTE;
+  private int stateRepeat = UNKNOWN_BYTE;
+  private int stateSaved = UNKNOWN_BYTE;
+  private int levelVolume = UNKNOWN_BYTE;
+  private int levelVolumeSteps = UNKNOWN_BYTE;
+  private int levelBattery = UNKNOWN_BYTE;
+
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
   private static final int MAX_PHONE_QUEUE = 600;
@@ -829,7 +838,33 @@ final class WatchLink {
    * Watch builds without the second row of buttons do not have this channel; it is then skipped.
    */
   void setButtonStates(int shuffle, int repeat, int saved) {
-    desired.put(CH_BUTTONS, new byte[] {(byte) shuffle, (byte) repeat, (byte) saved});
+    stateShuffle = shuffle;
+    stateRepeat = repeat;
+    stateSaved = saved;
+    putPhoneState();
+  }
+
+  /**
+   * Tells the watch the phone's media volume, how many volume steps the phone has, and the
+   * phone's battery in percent (watch build 7 and newer; older builds ignore them). Each is 0xff
+   * when not known.
+   */
+  void setPhoneLevels(int volume, int volumeSteps, int battery) {
+    // A byte each. Phones with more than 254 volume steps are scaled down to fit.
+    if (volume != UNKNOWN_BYTE && volumeSteps != UNKNOWN_BYTE && volumeSteps > 254) {
+      volume = Math.round(volume * 254f / volumeSteps);
+      volumeSteps = 254;
+    }
+    levelVolume = volume;
+    levelVolumeSteps = volumeSteps;
+    levelBattery = battery;
+    putPhoneState();
+  }
+
+  /** The button states and the levels travel together, in the channel the button states had first. */
+  private void putPhoneState() {
+    desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
+        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery});
     pump();
   }
 

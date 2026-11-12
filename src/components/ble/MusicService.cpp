@@ -50,7 +50,9 @@ namespace {
   constexpr ble_uuid128_t msPlaybackSpeedCharUuid {CharUuid(0x0a, 0x00)};
   constexpr ble_uuid128_t msRepeatCharUuid {CharUuid(0x0b, 0x00)};
   constexpr ble_uuid128_t msShuffleCharUuid {CharUuid(0x0c, 0x00)};
-  // Not part of stock InfiniTime: three bytes, the state of the shuffle, repeat and save buttons.
+  // Not part of stock InfiniTime: the state of the shuffle, repeat and save buttons (three bytes),
+  // followed since phone app build 7 by the phone's media volume, its number of volume steps and
+  // the phone's battery in percent.
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
   // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
   // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is
@@ -288,6 +290,11 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
         repeatState = static_cast<uint8_t>(s[1]);
         savedState = static_cast<uint8_t>(s[2]);
       }
+      if (notifSize >= 6) {
+        phoneVolume = static_cast<uint8_t>(s[3]);
+        phoneVolumeMax = static_cast<uint8_t>(s[4]);
+        phoneBattery = static_cast<uint8_t>(s[5]);
+      }
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msPositionCharUuid.u) == 0) {
       trackProgress = (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3];
       trackProgressUpdateTime = xTaskGetTickCount();
@@ -338,6 +345,9 @@ int Pinetime::Controllers::MusicService::getTrackLength() const {
 
 void Pinetime::Controllers::MusicService::OnDisconnect() {
   pendingActive = false;
+  phoneVolume = StateUnknown;
+  phoneVolumeMax = StateUnknown;
+  phoneBattery = StateUnknown;
   notificationManager.SetCall(Pinetime::Controllers::NotificationManager::CallStates::Idle, nullptr, 0);
 }
 

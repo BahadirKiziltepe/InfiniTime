@@ -27,7 +27,8 @@ namespace Pinetime {
        * without a break until one of the two happens, the call stops ringing, the screen is left, or a
        * sideways swipe silences it.
        *
-       * During the call: a swipe to the left or right turns the volume of the call down or up.
+       * During the call: a swipe to the left or right turns the volume of the call down or up, and
+       * holding the finger down for a second hangs up.
        *
        * For as long as there is a call, this screen sits between the main screen (swipe down) and the
        * notifications (swipe up). It closes by itself when the call is over.
@@ -47,7 +48,7 @@ namespace Pinetime {
 
       private:
         using CallStates = Pinetime::Controllers::NotificationManager::CallStates;
-        enum class Actions : uint8_t { None, Answering, Declining };
+        enum class Actions : uint8_t { None, Answering, Declining, Ending };
 
         void Draw(CallStates state);
         void StopBuzz();

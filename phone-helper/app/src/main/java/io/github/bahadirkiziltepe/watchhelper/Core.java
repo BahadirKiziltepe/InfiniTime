@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.media.AudioManager;
+import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -40,6 +41,12 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   static final int EVENT_CALL_DECLINE = 0x21;
   static final int EVENT_CALL_VOLUME_UP = 0x22;
   static final int EVENT_CALL_VOLUME_DOWN = 0x23;
+  // Holding the call screen during a call (watch build 7 and newer).
+  static final int EVENT_CALL_HANG_UP = 0x24;
+
+  /** Android announces every volume change under this name. It is not in the public list of names. */
+  private static final String VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION";
+  private static final int UNKNOWN_LEVEL = 0xff;
   static final int EVENT_OPEN = 0xe0;
 
   private static final String GADGETBRIDGE = "nodomain.freeyourgadget.gadgetbridge";
@@ -63,6 +70,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   final NotificationRelay notifications;
   final CallWatcher calls;
   private boolean watchWasReady;
+  /** The phone's battery in percent, as last announced by Android. */
+  private int phoneBattery = UNKNOWN_LEVEL;
 
   private final List<Runnable> screens = new ArrayList<>();
   private boolean screenUpdatePosted;
@@ -109,6 +118,25 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     clock.addAction(Intent.ACTION_TIME_CHANGED);
     clock.addAction(Intent.ACTION_TIMEZONE_CHANGED);
     app.registerReceiver(phoneClock, clock, Context.RECEIVER_EXPORTED);
+
+    // The watch shows the phone's media volume and battery, so both are passed on whenever they change.
+    BroadcastReceiver levels = new BroadcastReceiver() {
+      @Override
+      public void onReceive(Context context, Intent intent) {
+        noteBattery(intent);
+        sendLevels();
+      }
+    };
+    IntentFilter levelChanges = new IntentFilter();
+    levelChanges.addAction(VOLUME_CHANGED);
+    levelChanges.addAction(Intent.ACTION_BATTERY_CHANGED);
+    try {
+      // The battery announcement is a standing one: registering hands over the latest right away.
+      noteBattery(app.registerReceiver(levels, levelChanges, Context.RECEIVER_EXPORTED));
+    } catch (RuntimeException e) {
+      log.add("app", "cannot follow the phone's volume and battery: " + e);
+    }
+    sendLevels();
   }
 
   /** Starts whatever can be started. Called when the screen opens and when Android wakes the app. */
@@ -209,6 +237,36 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     changed();
   }
 
+  private void noteBattery(Intent intent) {
+    if (intent == null || !Intent.ACTION_BATTERY_CHANGED.equals(intent.getAction())) {
+      return;
+    }
+    int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+    int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+    if (level >= 0 && scale > 0) {
+      phoneBattery = Math.max(0, Math.min(100, Math.round(level * 100f / scale)));
+    }
+  }
+
+  /** Tells the watch the phone's media volume, in the phone's own steps, and the phone's battery. */
+  private void sendLevels() {
+    if (watch == null) {
+      return;
+    }
+    int volume = UNKNOWN_LEVEL;
+    int steps = UNKNOWN_LEVEL;
+    try {
+      AudioManager audio = app.getSystemService(AudioManager.class);
+      if (audio != null) {
+        volume = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        steps = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+      }
+    } catch (RuntimeException e) {
+      // Shown as unknown on the watch.
+    }
+    watch.setPhoneLevels(volume, steps, phoneBattery);
+  }
+
   // ---------------------------------------------------------------- watch -> phone
 
   @Override
@@ -276,6 +334,9 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       case EVENT_CALL_VOLUME_DOWN:
         calls.volume(false);
         break;
+      case EVENT_CALL_HANG_UP:
+        calls.hangUp();
+        break;
       default:
         log.add("watch", "unknown button message: " + eventName(code));
         break;
@@ -283,21 +344,24 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     changed();
   }
 
-  /** Moves the phone's media volume a tenth of the way up or down (see VolumeSteps). */
+  /**
+   * One step of the phone's media volume, the same as one press of its volume key, so the watch
+   * and the phone's own keys count alike.
+   */
   private void volume(boolean up) {
     try {
       AudioManager audio = app.getSystemService(AudioManager.class);
       if (audio != null) {
         int stream = AudioManager.STREAM_MUSIC;
         int before = audio.getStreamVolume(stream);
-        int max = audio.getStreamMaxVolume(stream);
-        audio.setStreamVolume(stream, VolumeSteps.next(before, audio.getStreamMinVolume(stream), max, up), 0);
+        audio.adjustStreamVolume(stream, up ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, 0);
         log.add("control", FROM_WATCH + ": volume " + (up ? "up" : "down") + " (" + before + " to "
-            + audio.getStreamVolume(stream) + " of " + max + ")");
+            + audio.getStreamVolume(stream) + " of " + audio.getStreamMaxVolume(stream) + ")");
       }
     } catch (RuntimeException e) {
       log.add("control", "volume change failed: " + e);
     }
+    sendLevels();
   }
 
   static String eventName(int code) {
@@ -328,6 +392,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         return "call volume up";
       case EVENT_CALL_VOLUME_DOWN:
         return "call volume down";
+      case EVENT_CALL_HANG_UP:
+        return "hang up";
       case EVENT_OPEN:
         return "music screen opened";
       default:
