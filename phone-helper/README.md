@@ -20,7 +20,8 @@ The Android companion for the watch firmware in this repository. It is deliberat
   can be called back
 - follows the phone's sound mode (sound, vibrate, mute) for the sound button on the watch,
   and changes it when that button is tapped
-- rings at full volume when the watch's "find my phone" button is tapped, also on mute
+- rings at full volume when the watch's "find my phone" button is tapped, also on mute,
+  with a sound picked in the app or else the phone's alarm sound
 - fetches the weather for where the phone is, for the watch's weather screen; see below
 - installs watch builds from this repository's Releases page ("Update watch")
 - shows what Spotify offers to other apps and produces a report, used to wire up the
@@ -34,10 +35,17 @@ name for it), the kind of call and the time.
 
 ## Weather
 
-The watch's weather screen shows the temperature, what it feels like, wind, humidity, the
-chance of rain for the day and for each of the next ten hours. The numbers come from
-[Open-Meteo](https://open-meteo.com) (weather data by Open-Meteo.com, CC BY 4.0), which needs
-no account. "Rain" is the service's chance of precipitation, so it counts snow as well.
+The watch's weather screen shows the weather in a word or two ("Partly cloudy"), the
+temperature, what it feels like, wind, humidity, the chance of rain for the day and for each
+of the next ten hours. The numbers come from [Open-Meteo](https://open-meteo.com) (weather
+data by Open-Meteo.com, CC BY 4.0), which needs no account.
+
+The service's chance of rain is the chance of anything falling. Whether that would be rain
+or snow is worked out in `WeatherReport.java`, from how much of each the forecast expects
+and, where it expects neither, from the temperature. The watch shows a chance of rain in
+blue and a chance of snow in light blue, and the words at the top in the colour of their
+kind (yellow sun, grey clouds, blue rain, light blue snow, violet freezing rain, orange
+thunderstorm).
 
 The weather is for where the phone is. The app only asks Android for the rough position,
 rounds it to two decimals (about a kilometre) and sends that to the weather service, over

@@ -84,11 +84,15 @@ namespace {
   //   0x2b a piece of it: where it goes (2 bytes), then the bytes, two pixels in each
   //   0x2c the picture is complete: the sum of all its bytes, to be sure
   // And the weather where the phone is, in answer to the watch asking for it:
-  //   0x2e the chance of rain hour by hour: the first hour (0-23), how many hours, one percentage each
+  //   0x2f the weather in a word or two: its kind (sun, cloud, rain, snow ...), then the words
+  //   0x2e the chance of rain hour by hour: the first hour (0-23), how many hours, one percentage
+  //        each, and since phone app build 15 two more bytes with one bit per hour (lowest first)
+  //        that says the hour's rain would be snow
   //   0x2d the rest, which completes the answer: status, flags (bit 0: Fahrenheit, bit 1: miles per
-  //        hour), temperature (2 bytes, low byte first, may be below zero), what it feels like (2 bytes),
-  //        wind speed, humidity in percent, chance of rain today in percent, and the hour and minute
-  //        the numbers are from. A status that says there are no numbers ends the message there.
+  //        hour, bit 2: what falls today is snow), temperature (2 bytes, low byte first, may be
+  //        below zero), what it feels like (2 bytes), wind speed, humidity in percent, chance of
+  //        rain today in percent, and the hour and minute the numbers are from. A status that says
+  //        there are no numbers ends the message there.
   constexpr ble_uuid128_t msPhoneCharUuid {CharUuid(0x0e, 0x00)};
   constexpr uint8_t PhoneNotificationBegin {0x01};
   constexpr uint8_t PhoneNotificationRemove {0x02};
@@ -110,6 +114,7 @@ namespace {
   constexpr uint8_t PhoneIconEnd {0x2c};
   constexpr uint8_t PhoneWeather {0x2d};
   constexpr uint8_t PhoneWeatherHours {0x2e};
+  constexpr uint8_t PhoneWeatherWords {0x2f};
   constexpr size_t PhoneWeatherSize {12};
   constexpr size_t PhoneListBeginSize {9};
   constexpr size_t PhoneMessageSize {20};
@@ -382,6 +387,19 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       incomingWeather.firstHour = static_cast<uint8_t>(message[1] % 24);
       incomingWeather.hours = static_cast<uint8_t>(count);
       std::memcpy(incomingWeather.rain.data(), &message[3], count);
+      // After the percentages the phone says for which of the hours they mean snow
+      const size_t maskAt = 3 + static_cast<size_t>(message[2]);
+      incomingWeather.snowHours = length >= maskAt + 2 ? static_cast<uint16_t>(message[maskAt] | (message[maskAt + 1] << 8)) : 0;
+      break;
+    }
+    case PhoneWeatherWords: {
+      if (length < 2) {
+        break;
+      }
+      const size_t count = std::min<size_t>(length - 2, WeatherConditionSize);
+      incomingWeather.conditionKind = message[1];
+      std::memcpy(incomingWeather.condition.data(), &message[2], count);
+      incomingWeather.condition[count] = '\0';
       break;
     }
     case PhoneWeather: {
@@ -392,6 +410,7 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       if (incomingWeather.hasNumbers() && length >= PhoneWeatherSize) {
         incomingWeather.fahrenheit = (message[2] & 0x01) != 0;
         incomingWeather.milesPerHour = (message[2] & 0x02) != 0;
+        incomingWeather.snowToday = (message[2] & 0x04) != 0;
         incomingWeather.temperature = static_cast<int16_t>(static_cast<uint16_t>(message[3] | (message[4] << 8)));
         incomingWeather.feelsLike = static_cast<int16_t>(static_cast<uint16_t>(message[5] | (message[6] << 8)));
         incomingWeather.wind = message[7];

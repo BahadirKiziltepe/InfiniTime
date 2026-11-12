@@ -90,6 +90,20 @@ final class PhoneFrames {
   // The weather, in answer to the watch asking for it: the hours first, then the rest.
   private static final int WEATHER = 0x2d;
   private static final int WEATHER_HOURS = 0x2e;
+  private static final int WEATHER_WORDS = 0x2f;
+  /** The most the watch keeps of the weather in words. */
+  static final int MAX_WEATHER_WORDS = 18;
+  /** What kind of weather the words are about. The watch shows them in the colour of the kind. */
+  static final int WEATHER_KIND_NONE = 0;
+  static final int WEATHER_KIND_SUN = 1;
+  /** Weather with no colour of its own: a clear night. */
+  static final int WEATHER_KIND_PLAIN = 2;
+  static final int WEATHER_KIND_CLOUD = 3;
+  static final int WEATHER_KIND_RAIN = 4;
+  static final int WEATHER_KIND_SNOW = 5;
+  /** Freezing rain or drizzle. */
+  static final int WEATHER_KIND_ICE = 6;
+  static final int WEATHER_KIND_STORM = 7;
   /** What the watch is told along with the numbers, or in place of them. */
   static final int WEATHER_FRESH = 1;
   /** The numbers are the last ones there were; newer ones could not be had. */
@@ -304,24 +318,37 @@ final class PhoneFrames {
    * miles or kilometres per hour, humidity and the day's chance of rain in percent or UNKNOWN.
    * {@code hour} and {@code minute} say when the numbers are from. {@code hourly} holds the chance
    * of rain for the hour {@code firstHour} (0 to 23) that is under way and the hours after it.
+   *
+   * <p>Since watch build 17: {@code words} is the weather in a word or two ("Partly cloudy") and
+   * {@code kind} one of the WEATHER_KIND_ values; {@code snowToday} says that what falls today is
+   * snow, and bit n of {@code snowHours} the same for the n-th of the hours. Older builds of the
+   * watch skip what they do not know.
    */
-  static List<byte[]> weather(int status, boolean fahrenheit, boolean milesPerHour, int temperature, int feelsLike,
-      int wind, int humidity, int rainToday, int hour, int minute, int firstHour, int[] hourly) {
+  static List<byte[]> weather(int status, boolean fahrenheit, boolean milesPerHour, boolean snowToday,
+      int temperature, int feelsLike, int wind, int humidity, int rainToday, int hour, int minute, int firstHour,
+      int[] hourly, int snowHours, String words, int kind) {
     List<byte[]> out = new ArrayList<>();
+    byte[] text = WatchText.encode(words == null ? "" : words, MAX_WEATHER_WORDS);
+    if (text.length > 0) {
+      out.add(piece(new byte[] {(byte) WEATHER_WORDS, (byte) kind}, text, 0, text.length));
+    }
     int count = Math.min(hourly == null ? 0 : hourly.length, WEATHER_MAX_HOURS);
-    byte[] hours = new byte[3 + count];
+    byte[] hours = new byte[3 + count + 2];
     hours[0] = (byte) WEATHER_HOURS;
     hours[1] = (byte) clamp(firstHour, 0, 23);
     hours[2] = (byte) count;
     for (int i = 0; i < count; i++) {
       hours[3 + i] = (byte) percent(hourly[i]);
     }
+    hours[3 + count] = (byte) snowHours;
+    hours[4 + count] = (byte) (snowHours >> 8);
     out.add(hours);
     int t = clamp(temperature, -999, 999);
     int f = clamp(feelsLike, -999, 999);
-    out.add(new byte[] {(byte) WEATHER, (byte) status, (byte) ((fahrenheit ? 1 : 0) | (milesPerHour ? 2 : 0)), (byte) t,
-        (byte) (t >> 8), (byte) f, (byte) (f >> 8), (byte) clamp(wind, 0, 250), (byte) percent(humidity),
-        (byte) percent(rainToday), (byte) clamp(hour, 0, 23), (byte) clamp(minute, 0, 59)});
+    int flags = (fahrenheit ? 1 : 0) | (milesPerHour ? 2 : 0) | (snowToday ? 4 : 0);
+    out.add(new byte[] {(byte) WEATHER, (byte) status, (byte) flags, (byte) t, (byte) (t >> 8), (byte) f,
+        (byte) (f >> 8), (byte) clamp(wind, 0, 250), (byte) percent(humidity), (byte) percent(rainToday),
+        (byte) clamp(hour, 0, 23), (byte) clamp(minute, 0, 59)});
     return out;
   }
 

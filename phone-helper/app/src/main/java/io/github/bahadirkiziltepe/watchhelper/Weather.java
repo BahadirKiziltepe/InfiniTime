@@ -39,6 +39,7 @@ final class Weather {
   private static final String KEY_BODY = "answer";
   private static final String KEY_BODY_AT = "answer_at";
   private static final String KEY_BODY_IMPERIAL = "answer_imperial";
+  private static final String KEY_BODY_FORMAT = "answer_format";
   private static final String KEY_BODY_LATITUDE = "answer_latitude";
   private static final String KEY_BODY_LONGITUDE = "answer_longitude";
   private static final String KEY_PLACE = "place";
@@ -168,7 +169,10 @@ final class Weather {
     boolean moved = prefs.getBoolean(KEY_PLACE, false)
         && (Math.abs(prefs.getFloat(KEY_LATITUDE, 0) - prefs.getFloat(KEY_BODY_LATITUDE, 0)) > MOVED_DEGREES
             || Math.abs(prefs.getFloat(KEY_LONGITUDE, 0) - prefs.getFloat(KEY_BODY_LONGITUDE, 0)) > MOVED_DEGREES);
-    boolean fresh = !askAgain && !moved && kept != null && now - keptAt < FRESH_MS && keptImperial == imperial;
+    // An answer from before the app asked for the weather in words lacks them: it is asked again.
+    boolean complete = prefs.getInt(KEY_BODY_FORMAT, 1) == WeatherReport.FORMAT;
+    boolean fresh = !askAgain && !moved && complete && kept != null && now - keptAt < FRESH_MS
+        && keptImperial == imperial;
     if (kept != null) {
       show(kept, keptAt);
       if (toWatch) {
@@ -196,7 +200,8 @@ final class Weather {
       WeatherReport report = WeatherReport.parse(reply.body, imperial, System.currentTimeMillis() / 1000);
       long at = System.currentTimeMillis();
       prefs.edit().putString(KEY_BODY, reply.body).putLong(KEY_BODY_AT, at).putBoolean(KEY_BODY_IMPERIAL, imperial)
-          .putFloat(KEY_BODY_LATITUDE, (float) place[0]).putFloat(KEY_BODY_LONGITUDE, (float) place[1]).apply();
+          .putFloat(KEY_BODY_LATITUDE, (float) place[0]).putFloat(KEY_BODY_LONGITUDE, (float) place[1])
+          .putInt(KEY_BODY_FORMAT, WeatherReport.FORMAT).apply();
       fetched++;
       lastProblem = "";
       show(report, at);

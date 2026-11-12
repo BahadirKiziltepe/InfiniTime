@@ -194,6 +194,19 @@ namespace Pinetime {
       static constexpr uint8_t WeatherNoAnswer = 0x12;
       static constexpr uint8_t WeatherHours = 10;
       static constexpr uint8_t WeatherUnknown = 0xff;
+      // The weather in a word or two ("Partly cloudy"), and what kind of weather that is.
+      // The screen shows the words in the colour of the kind.
+      static constexpr uint8_t WeatherConditionSize = 18;
+      static constexpr uint8_t WeatherKindNone = 0;
+      static constexpr uint8_t WeatherKindSun = 1;
+      // Weather with no colour of its own: a clear night
+      static constexpr uint8_t WeatherKindPlain = 2;
+      static constexpr uint8_t WeatherKindCloud = 3;
+      static constexpr uint8_t WeatherKindRain = 4;
+      static constexpr uint8_t WeatherKindSnow = 5;
+      // Freezing rain or drizzle
+      static constexpr uint8_t WeatherKindIce = 6;
+      static constexpr uint8_t WeatherKindStorm = 7;
 
       struct Weather {
         uint8_t status = WeatherNone;
@@ -205,6 +218,8 @@ namespace Pinetime {
         // In percent; WeatherUnknown if the phone did not say
         uint8_t humidity = WeatherUnknown;
         uint8_t rainToday = WeatherUnknown;
+        // What falls today, if anything does, is snow rather than rain
+        bool snowToday = false;
         // When these numbers are from, on the phone's clock
         uint8_t hour = 0;
         uint8_t minute = 0;
@@ -212,6 +227,11 @@ namespace Pinetime {
         uint8_t firstHour = 0;
         uint8_t hours = 0;
         std::array<uint8_t, WeatherHours> rain {};
+        // One bit per hour, lowest first: what would fall in that hour is snow
+        uint16_t snowHours = 0;
+        // Empty if the phone did not say (a phone app older than build 15)
+        std::array<char, WeatherConditionSize + 1> condition {};
+        uint8_t conditionKind = WeatherKindNone;
         // When the watch received them
         TickType_t arrived = 0;
 

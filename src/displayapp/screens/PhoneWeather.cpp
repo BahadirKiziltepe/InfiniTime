@@ -21,15 +21,44 @@ namespace {
   constexpr lv_coord_t noteWidth = 224;
   constexpr uint8_t hoursPerRow = 5;
 
-  constexpr lv_color_t titleColor = LV_COLOR_MAKE(0x5a, 0xc8, 0xfa);
   constexpr lv_color_t hourColor = LV_COLOR_MAKE(0x90, 0x90, 0x90);
+  // Numbers that are not what the phone would send right now
+  constexpr lv_color_t staleColor = LV_COLOR_MAKE(0x80, 0x80, 0x80);
 
-  // The colours of a chance of rain, as LVGL wants them inside a text: little, some, a lot
-  constexpr const char* littleRain = "909090";
-  constexpr const char* someRain = "ffffff";
-  constexpr const char* muchRain = "4a90ff";
-  constexpr uint8_t someRainFrom = 20;
-  constexpr uint8_t muchRainFrom = 50;
+  // The colour of each kind of weather: of the words at the top, and of a chance of rain or snow
+  constexpr lv_color_t sunColor = LV_COLOR_MAKE(0xff, 0xd0, 0x00);
+  constexpr lv_color_t cloudColor = LV_COLOR_MAKE(0xb0, 0xb0, 0xb0);
+  constexpr lv_color_t rainColor = LV_COLOR_MAKE(0x4a, 0x90, 0xff);
+  constexpr lv_color_t snowColor = LV_COLOR_MAKE(0xa6, 0xe3, 0xff);
+  constexpr lv_color_t iceColor = LV_COLOR_MAKE(0xc5, 0x8c, 0xff);
+  constexpr lv_color_t stormColor = LV_COLOR_MAKE(0xff, 0x9a, 0x30);
+
+  // The same blue and light blue the way LVGL wants a colour inside a text, and the grey of a
+  // chance too small to be worth a colour
+  constexpr const char* rainText = "4a90ff";
+  constexpr const char* snowText = "a6e3ff";
+  constexpr const char* littleText = "909090";
+  constexpr uint8_t worthAColorFrom = 20;
+
+  lv_color_t ColorOf(uint8_t kind) {
+    using Music = Pinetime::Controllers::MusicService;
+    switch (kind) {
+      case Music::WeatherKindSun:
+        return sunColor;
+      case Music::WeatherKindCloud:
+        return cloudColor;
+      case Music::WeatherKindRain:
+        return rainColor;
+      case Music::WeatherKindSnow:
+        return snowColor;
+      case Music::WeatherKindIce:
+        return iceColor;
+      case Music::WeatherKindStorm:
+        return stormColor;
+      default:
+        return LV_COLOR_WHITE;
+    }
+  }
 
   constexpr const char* degree = "\xC2\xB0";
 
@@ -59,13 +88,17 @@ PhoneWeather::PhoneWeather(Pinetime::Controllers::MusicService& musicService,
                            Pinetime::Controllers::Settings& settingsController)
   : musicService {musicService}, bleController {bleController}, settingsController {settingsController} {
   labelTitle = lv_label_create(lv_scr_act(), nullptr);
-  lv_obj_set_style_local_text_color(labelTitle, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, titleColor);
   lv_label_set_text_static(labelTitle, "Weather");
   lv_obj_set_pos(labelTitle, margin, 0);
 
+  labelCondition = lv_label_create(lv_scr_act(), nullptr);
+  lv_label_set_text_static(labelCondition, "");
+  lv_obj_align(labelCondition, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -margin, 0);
+
   labelTime = lv_label_create(lv_scr_act(), nullptr);
+  lv_obj_set_style_local_text_color(labelTime, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::orange);
   lv_label_set_text_static(labelTime, "");
-  lv_obj_align(labelTime, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -margin, 0);
+  lv_obj_set_pos(labelTime, margin, 0);
 
   labelTemperature = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_font(labelTemperature, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &jetbrains_mono_42);
@@ -86,6 +119,8 @@ PhoneWeather::PhoneWeather(Pinetime::Controllers::MusicService& musicService,
   lv_obj_set_pos(labelHumidity, margin, 96);
 
   labelRain = lv_label_create(lv_scr_act(), nullptr);
+  // The percentage carries the colour of what would fall
+  lv_label_set_recolor(labelRain, true);
   lv_label_set_text_static(labelRain, "");
   lv_obj_set_pos(labelRain, margin, 118);
 
@@ -183,7 +218,9 @@ void PhoneWeather::Draw(TickType_t now) {
   const bool twelveHours = settingsController.GetClockType() == Pinetime::Controllers::Settings::ClockType::H12;
   const bool numbers = weather.hasNumbers() && (now - weather.arrived) < tooOld;
 
-  lv_obj_set_hidden(labelTime, !numbers);
+  lv_obj_set_hidden(labelTitle, numbers);
+  lv_obj_set_hidden(labelCondition, !numbers);
+  lv_obj_set_hidden(labelTime, true);
   lv_obj_set_hidden(labelTemperature, !numbers);
   lv_obj_set_hidden(labelFeels, !numbers);
   lv_obj_set_hidden(labelWind, !numbers);
@@ -215,14 +252,36 @@ void PhoneWeather::Draw(TickType_t now) {
     return;
   }
 
-  // The time the numbers are from. Orange when they are not what the phone would send right now:
-  // it could not get newer ones, it is not connected, or it has not answered.
+  // Numbers that are not what the phone would send right now (it could not get newer ones, it is
+  // not connected, or it has not answered) are greyed, and the time they are from is shown.
+  const bool stale = weather.status == Music::WeatherOld || !connected || unanswered;
+  const lv_color_t numberColor = stale ? staleColor : LV_COLOR_WHITE;
   char clock[12];
   ClockText(clock, sizeof(clock), weather.hour, weather.minute, twelveHours);
-  const bool stale = weather.status == Music::WeatherOld || !connected || unanswered;
-  lv_label_set_text(labelTime, clock);
-  lv_obj_set_style_local_text_color(labelTime, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, stale ? Colors::orange : Colors::lightGray);
-  lv_obj_align(labelTime, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -margin, 0);
+
+  if (weather.condition[0] != '\0') {
+    // The weather in words, in the colour of its kind
+    lv_label_set_text(labelCondition, weather.condition.data());
+    lv_obj_set_style_local_text_color(labelCondition, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, ColorOf(weather.conditionKind));
+    lv_obj_align(labelCondition, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -margin, 0);
+    if (stale) {
+      // The time goes in the corner the words leave free, if they leave enough of it
+      lv_label_set_text(labelTime, clock);
+      const lv_coord_t room = LV_HOR_RES_MAX - 2 * margin - lv_obj_get_width(labelCondition);
+      lv_obj_set_hidden(labelTime, lv_obj_get_width(labelTime) + 2 * margin > room);
+    }
+  } else {
+    // A phone app that does not send the weather in words: the time, where the words would be
+    lv_label_set_text(labelCondition, clock);
+    lv_obj_set_style_local_text_color(labelCondition, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, stale ? Colors::orange : Colors::lightGray);
+    lv_obj_align(labelCondition, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -margin, 0);
+  }
+
+  lv_obj_set_style_local_text_color(labelTemperature, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, numberColor);
+  lv_obj_set_style_local_text_color(labelFeels, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, numberColor);
+  lv_obj_set_style_local_text_color(labelWind, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, numberColor);
+  lv_obj_set_style_local_text_color(labelHumidity, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, numberColor);
+  lv_obj_set_style_local_text_color(labelRain, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, numberColor);
 
   lv_label_set_text_fmt(labelTemperature, "%d%s%c", static_cast<int>(weather.temperature), degree, weather.fahrenheit ? 'F' : 'C');
   lv_label_set_text_fmt(labelFeels, "Feels\n%d%s", static_cast<int>(weather.feelsLike), degree);
@@ -234,10 +293,20 @@ void PhoneWeather::Draw(TickType_t now) {
   } else {
     lv_label_set_text_static(labelHumidity, "Humidity --");
   }
-  if (weather.rainToday <= 100) {
-    lv_label_set_text_fmt(labelRain, "Rain today %d%%", static_cast<int>(weather.rainToday));
+
+  // The day's chance of rain, or of snow if that is what would fall: the number in blue or light
+  // blue, unless the chance is too small to be worth a colour
+  const char* falling = weather.snowToday ? "Snow" : "Rain";
+  if (weather.rainToday > 100) {
+    lv_label_set_text_fmt(labelRain, "%s today --", falling);
+  } else if (weather.rainToday >= worthAColorFrom) {
+    lv_label_set_text_fmt(labelRain,
+                          "%s today #%s %d%%#",
+                          falling,
+                          weather.snowToday ? snowText : rainText,
+                          static_cast<int>(weather.rainToday));
   } else {
-    lv_label_set_text_static(labelRain, "Rain today --");
+    lv_label_set_text_fmt(labelRain, "%s today %d%%", falling, static_cast<int>(weather.rainToday));
   }
 
   for (size_t row = 0; row < labelHours.size(); row++) {
@@ -261,10 +330,12 @@ void PhoneWeather::Draw(TickType_t now) {
       hoursUsed += 3;
       const uint8_t chance = weather.rain[index];
       if (chance <= 100) {
-        const char* color = chance >= muchRainFrom ? muchRain : chance >= someRainFrom ? someRain : littleRain;
+        // Blue for rain, light blue for snow, grey for a chance too small to matter
+        const bool snow = (weather.snowHours & (1u << index)) != 0;
+        const char* color = chance < worthAColorFrom ? littleText : snow ? snowText : rainText;
         lv_snprintf(chances + chancesUsed, 13, "#%s %3d#", color, static_cast<int>(chance));
       } else {
-        lv_snprintf(chances + chancesUsed, 13, "#%s  --#", littleRain);
+        lv_snprintf(chances + chancesUsed, 13, "#%s  --#", littleText);
       }
       chancesUsed += 12;
     }

@@ -5,9 +5,12 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Handler;
@@ -23,10 +26,13 @@ import java.io.IOException;
  * Find my phone: makes the phone ring at full volume when the watch asks, also when the phone is
  * on mute or vibrate.
  *
- * <p>The sound is the phone's alarm sound, played the way an alarm clock plays it: alarms have
- * their own volume and are not silenced by the sound mode. That volume is turned all the way up
- * for the ringing and put back afterwards, and so is Do Not Disturb if it was on. The phone
- * vibrates as well.
+ * <p>The sound is one the owner picked in the app, or else the phone's alarm sound. It is played
+ * the way an alarm clock plays its sound: alarms have their own volume and are not silenced by the
+ * sound mode. That volume is turned all the way up for the ringing and put back afterwards, and so
+ * is Do Not Disturb if it was on. The phone vibrates as well.
+ *
+ * <p>A picked sound can be one this app may not open itself (a sound another app added to the
+ * phone's ringtones). Android's own ringtone player can, so that one is asked to play it then.
  *
  * <p>It stops when the watch says so, when the phone is unlocked, when the app's screen is opened,
  * or by itself after a minute.
@@ -35,6 +41,12 @@ final class PhoneFinder {
   private static final long RING_MS = 60_000;
   private static final long BEEP_EVERY_MS = 1_200;
   private static final int BEEP_MS = 800;
+  /** How long Android's ringtone player gets to start before the usual sounds are used instead. */
+  private static final long SYSTEM_SOUND_CHECK_MS = 1_500;
+
+  private static final String PREFS = "find-phone";
+  private static final String KEY_SOUND = "sound";
+  private static final String KEY_SOUND_NAME = "sound_name";
 
   private final Context app;
   private final Handler main;
@@ -42,9 +54,12 @@ final class PhoneFinder {
   private final WatchLink watch;
   private final SoundMode sound;
   private final Runnable changed;
+  private final SharedPreferences prefs;
 
   private boolean ringing;
   private MediaPlayer player;
+  /** The picked sound while Android's own ringtone player plays it. */
+  private Ringtone systemSound;
   private ToneGenerator tone;
   private Vibrator vibrating;
   private boolean listening;
@@ -61,6 +76,7 @@ final class PhoneFinder {
 
   private final Runnable timeUp = () -> stop("a minute had passed");
   private final Runnable beep = this::beep;
+  private final Runnable checkSystemSound = this::checkSystemSound;
 
   /** Only the system can send this announcement. */
   private final BroadcastReceiver unlocked = new BroadcastReceiver() {
@@ -77,6 +93,40 @@ final class PhoneFinder {
     this.watch = watch;
     this.sound = sound;
     this.changed = changed;
+    this.prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+  }
+
+  // ---------------------------------------------------------------- which sound
+
+  /** The sound the owner picked, or null for the phone's alarm sound. */
+  Uri chosenSound() {
+    String saved = prefs.getString(KEY_SOUND, null);
+    try {
+      return saved == null || saved.isEmpty() ? null : Uri.parse(saved);
+    } catch (RuntimeException e) {
+      return null;
+    }
+  }
+
+  /** What the screen calls the sound. */
+  String soundName() {
+    if (chosenSound() == null) {
+      return "the phone’s alarm sound";
+    }
+    String name = prefs.getString(KEY_SOUND_NAME, "");
+    return name.isEmpty() ? "a sound you picked" : name;
+  }
+
+  /** Remembers the picked sound; null goes back to the phone's alarm sound. The name is only for the screen. */
+  void setSound(Uri picked, String name) {
+    if (picked == null) {
+      prefs.edit().remove(KEY_SOUND).remove(KEY_SOUND_NAME).apply();
+    } else {
+      prefs.edit().putString(KEY_SOUND, picked.toString()).putString(KEY_SOUND_NAME, name == null ? "" : name).apply();
+    }
+    // Which sound it is stays out of the log: a file's name can say more than it should
+    log.add("find", picked == null ? "the sound is the phone's alarm sound again" : "a sound was picked");
+    changed.run();
   }
 
   boolean ringing() {
@@ -157,6 +207,15 @@ final class PhoneFinder {
     ringing = false;
     main.removeCallbacks(timeUp);
     main.removeCallbacks(beep);
+    main.removeCallbacks(checkSystemSound);
+    if (systemSound != null) {
+      try {
+        systemSound.stop();
+      } catch (RuntimeException e) {
+        // It stops with the app at the latest.
+      }
+      systemSound = null;
+    }
     if (player != null) {
       try {
         player.stop();
@@ -226,26 +285,31 @@ final class PhoneFinder {
     savedFilter = 0;
   }
 
-  /** Starts the sound: the alarm sound, or the ringtone, or the notification sound, or plain beeps. */
+  /** Starts the sound: the picked one, or the alarm sound, or the ringtone, or the notification sound, or plain beeps. */
   private boolean play() {
+    Uri chosen = chosenSound();
+    if (chosen != null) {
+      if (playHere(chosen)) {
+        lastSound = "the picked sound";
+        return true;
+      }
+      if (playWithAndroid(chosen)) {
+        lastSound = "the picked sound, played by Android";
+        return true;
+      }
+    }
+    return playUsual();
+  }
+
+  /** The sounds every phone has, in the order they are tried, and beeps if none of them plays. */
+  private boolean playUsual() {
     Uri[] sounds = {Settings.System.DEFAULT_ALARM_ALERT_URI, Settings.System.DEFAULT_RINGTONE_URI,
         Settings.System.DEFAULT_NOTIFICATION_URI};
     String[] names = {"alarm sound", "ringtone", "notification sound"};
     for (int i = 0; i < sounds.length; i++) {
-      MediaPlayer candidate = new MediaPlayer();
-      try {
-        candidate.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
-        candidate.setDataSource(app, sounds[i]);
-        candidate.setLooping(true);
-        candidate.prepare();
-        candidate.start();
-        player = candidate;
+      if (playHere(sounds[i])) {
         lastSound = names[i];
         return true;
-      } catch (IOException | RuntimeException e) {
-        // No such sound, or none the app may read. Try the next.
-        candidate.release();
       }
     }
     try {
@@ -258,6 +322,74 @@ final class PhoneFinder {
       lastSound = "no sound";
       return false;
     }
+  }
+
+  private static AudioAttributes asAlarm() {
+    return new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build();
+  }
+
+  /** Plays a sound in this app, over and over. False if there is no such sound, or none the app may read. */
+  private boolean playHere(Uri what) {
+    MediaPlayer candidate = new MediaPlayer();
+    try {
+      candidate.setAudioAttributes(asAlarm());
+      candidate.setDataSource(app, what);
+      candidate.setLooping(true);
+      candidate.prepare();
+      candidate.start();
+      player = candidate;
+      return true;
+    } catch (IOException | RuntimeException e) {
+      candidate.release();
+      return false;
+    }
+  }
+
+  /**
+   * Has Android's own ringtone player play a sound this app may not open. Whether it really
+   * sounds is only known a moment later; if it does not, the usual sounds take over.
+   */
+  private boolean playWithAndroid(Uri what) {
+    try {
+      Ringtone candidate = RingtoneManager.getRingtone(app, what);
+      if (candidate == null) {
+        return false;
+      }
+      candidate.setAudioAttributes(asAlarm());
+      candidate.setLooping(true);
+      candidate.setVolume(1f);
+      candidate.play();
+      systemSound = candidate;
+      main.postDelayed(checkSystemSound, SYSTEM_SOUND_CHECK_MS);
+      return true;
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
+  private void checkSystemSound() {
+    if (!ringing || systemSound == null) {
+      return;
+    }
+    boolean sounding;
+    try {
+      sounding = systemSound.isPlaying();
+    } catch (RuntimeException e) {
+      sounding = false;
+    }
+    if (sounding) {
+      return;
+    }
+    try {
+      systemSound.stop();
+    } catch (RuntimeException e) {
+      // Nothing was playing anyway.
+    }
+    systemSound = null;
+    playUsual();
+    log.add("find", "the picked sound could not be played; ringing with " + lastSound + " instead");
+    changed.run();
   }
 
   private void beep() {
@@ -293,12 +425,13 @@ final class PhoneFinder {
       return "Find my phone: ringing now… It stops when you tap Stop ringing, unlock the phone, or after a minute.";
     }
     return "✓ Find my phone: ready. The button on the watch's settings screen makes this phone ring at full "
-        + "volume, also on mute.";
+        + "volume, also on mute. Sound: " + soundName() + ".";
   }
 
   /** For the report. */
   String dump() {
-    return "Find my phone: rung " + rings + " times" + (ringing ? ", ringing now" : "")
+    return "Find my phone: sound " + (chosenSound() == null ? "is the alarm sound" : "was picked") + ", rung " + rings
+        + " times" + (ringing ? ", ringing now" : "")
         + (lastSound.isEmpty() ? "" : ", last sound: " + lastSound) + (lastEnd.isEmpty() ? "" : ", last end: " + lastEnd);
   }
 }

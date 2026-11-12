@@ -11,9 +11,12 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.ContactsContract;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -46,6 +49,8 @@ public class MainActivity extends Activity {
   private static final int REQUEST_PHONE = 2;
   private static final int REQUEST_PICK_PERSON = 3;
   private static final int REQUEST_LOCATION = 4;
+  private static final int REQUEST_PICK_SOUND = 5;
+  private static final int REQUEST_PICK_SOUND_FILE = 6;
   private static final int LOG_LINES_ON_SCREEN = 60;
 
   private Core core;
@@ -169,6 +174,12 @@ public class MainActivity extends Activity {
   @Override
   protected void onActivityResult(int requestCode, int resultCode, Intent data) {
     super.onActivityResult(requestCode, resultCode, data);
+    if (requestCode == REQUEST_PICK_SOUND || requestCode == REQUEST_PICK_SOUND_FILE) {
+      if (resultCode == RESULT_OK && data != null) {
+        onSoundPicked(requestCode, data);
+      }
+      return;
+    }
     if (requestCode != REQUEST_PICK_PERSON || resultCode != RESULT_OK || data == null || data.getData() == null) {
       return;
     }
@@ -309,7 +320,8 @@ public class MainActivity extends Activity {
     });
     ui.add(phone, ui.flow(allowCallsButton,
         ui.button("Send a test notification", Ui.TONAL, v -> core.notifications.sendTest()),
-        ui.button("Test the Claude dot", Ui.TONAL, v -> core.testClaude()), ringButton), 16);
+        ui.button("Test the Claude dot", Ui.TONAL, v -> core.testClaude()), ringButton,
+        ui.button("Change ring sound", Ui.TONAL, v -> chooseRingSound())), 16);
 
     // Watch software
     root.addView(ui.caption("Watch software"));
@@ -812,6 +824,104 @@ public class MainActivity extends Activity {
     if (always) {
       toast("Pick “Allow all the time”, then come back.");
     }
+  }
+
+  // ---------------------------------------------------------------- the sound for "find my phone"
+
+  private void chooseRingSound() {
+    CharSequence[] choices = {"One of the phone’s sounds", "A sound file", "The phone’s alarm sound"};
+    new AlertDialog.Builder(this)
+        .setTitle("Sound for Find my phone")
+        .setItems(choices, (dialog, which) -> {
+          if (which == 0) {
+            pickPhoneSound();
+          } else if (which == 1) {
+            pickSoundFile();
+          } else {
+            core.finder.setSound(null, null);
+            render();
+          }
+        })
+        .setNegativeButton("Cancel", null)
+        .show();
+  }
+
+  /** The phone's own list of ringtones, notification sounds and alarm sounds, with the ones added to it. */
+  private void pickPhoneSound() {
+    try {
+      Intent pick = new Intent(RingtoneManager.ACTION_RINGTONE_PICKER);
+      pick.putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALL);
+      pick.putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Sound for Find my phone");
+      pick.putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false);
+      pick.putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, false);
+      pick.putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, core.finder.chosenSound());
+      startActivityForResult(pick, REQUEST_PICK_SOUND);
+    } catch (RuntimeException e) {
+      toast("Could not open the phone’s list of sounds. Try “A sound file”.");
+    }
+  }
+
+  /** Any sound file on the phone. */
+  private void pickSoundFile() {
+    try {
+      Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+      open.addCategory(Intent.CATEGORY_OPENABLE);
+      open.setType("audio/*");
+      startActivityForResult(open, REQUEST_PICK_SOUND_FILE);
+    } catch (RuntimeException e) {
+      toast("Could not open the phone’s files.");
+    }
+  }
+
+  private void onSoundPicked(int requestCode, Intent data) {
+    Uri picked;
+    String name;
+    if (requestCode == REQUEST_PICK_SOUND) {
+      picked = data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri.class);
+      name = picked == null ? "" : soundTitle(picked);
+    } else {
+      picked = data.getData();
+      if (picked != null) {
+        try {
+          // Without this the app could read the file only until the phone restarts
+          getContentResolver().takePersistableUriPermission(picked, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (RuntimeException e) {
+          // It is played while Android lets the app read it, and the alarm sound after that.
+        }
+      }
+      name = picked == null ? "" : fileName(picked);
+    }
+    if (picked == null) {
+      toast("No sound was picked.");
+      return;
+    }
+    core.finder.setSound(picked, name);
+    toast("Tap “Ring this phone” to hear it.");
+    render();
+  }
+
+  /** The name the phone shows for one of its sounds. */
+  private String soundTitle(Uri sound) {
+    try {
+      Ringtone ringtone = RingtoneManager.getRingtone(this, sound);
+      String title = ringtone == null ? null : ringtone.getTitle(this);
+      return title == null ? "" : title;
+    } catch (RuntimeException e) {
+      return "";
+    }
+  }
+
+  private String fileName(Uri file) {
+    try (Cursor cursor = getContentResolver().query(file, new String[] {OpenableColumns.DISPLAY_NAME}, null, null,
+        null)) {
+      if (cursor != null && cursor.moveToFirst()) {
+        String name = cursor.getString(0);
+        return name == null ? "" : name;
+      }
+    } catch (RuntimeException e) {
+      // Shown as "a sound you picked".
+    }
+    return "";
   }
 
   private void openDoNotDisturbSettings() {
