@@ -92,6 +92,11 @@ final class SpotifyWatcher {
   private int ratingType;
   private String signature = "";
 
+  // What Spotify's shuffle, repeat and save buttons show right now (see ButtonStates).
+  private int shuffleState = ButtonStates.UNKNOWN;
+  private int repeatState = ButtonStates.UNKNOWN;
+  private int savedState = ButtonStates.UNKNOWN;
+
   // The state a play/pause press just asked for, so two quick presses toggle twice.
   private boolean assumedPlaying;
   private long assumedUntil;
@@ -232,6 +237,9 @@ final class SpotifyWatcher {
     repeatMode = PlaybackStateCompat.REPEAT_MODE_INVALID;
     compatReady = false;
     ratingType = 0;
+    shuffleState = ButtonStates.UNKNOWN;
+    repeatState = ButtonStates.UNKNOWN;
+    savedState = ButtonStates.UNKNOWN;
     if (had && why != null) {
       signature = "";
       log.add("spotify", why);
@@ -352,12 +360,54 @@ final class SpotifyWatcher {
         log.add("spotify", "could not read standard shuffle/repeat: " + e);
       }
     }
+    readButtonStates();
     String now = signatureLine();
     if (!now.equals(signature)) {
       signature = now;
       log.add("spotify", now);
     }
     listener.onSpotifyChanged();
+  }
+
+  /**
+   * Works out what the shuffle, repeat and save buttons show. Spotify's own buttons say the most
+   * (they are the only place smart shuffle and "saved" appear) and change the instant something is
+   * pressed; the standard values fill in if a button is missing.
+   */
+  private void readButtonStates() {
+    int shuffle = ButtonStates.UNKNOWN;
+    int repeat = ButtonStates.UNKNOWN;
+    int saved = ButtonStates.UNKNOWN;
+    for (Custom custom : customs) {
+      if (custom.kind == ActionPicker.SHUFFLE && shuffle == ButtonStates.UNKNOWN) {
+        shuffle = ButtonStates.shuffle(custom.id, custom.iconName);
+      } else if (custom.kind == ActionPicker.REPEAT && repeat == ButtonStates.UNKNOWN) {
+        repeat = ButtonStates.repeat(custom.id, custom.iconName);
+      } else if (custom.kind == ActionPicker.ADD && saved == ButtonStates.UNKNOWN) {
+        saved = ButtonStates.saved(custom.id, custom.label, custom.iconName);
+      }
+    }
+    if (shuffle == ButtonStates.UNKNOWN) {
+      if (shuffleMode == PlaybackStateCompat.SHUFFLE_MODE_NONE) {
+        shuffle = ButtonStates.SHUFFLE_OFF;
+      } else if (shuffleMode == PlaybackStateCompat.SHUFFLE_MODE_ALL
+          || shuffleMode == PlaybackStateCompat.SHUFFLE_MODE_GROUP) {
+        shuffle = ButtonStates.SHUFFLE_ON;
+      }
+    }
+    if (repeat == ButtonStates.UNKNOWN) {
+      if (repeatMode == PlaybackStateCompat.REPEAT_MODE_NONE) {
+        repeat = ButtonStates.REPEAT_OFF;
+      } else if (repeatMode == PlaybackStateCompat.REPEAT_MODE_ONE) {
+        repeat = ButtonStates.REPEAT_ONE;
+      } else if (repeatMode == PlaybackStateCompat.REPEAT_MODE_ALL
+          || repeatMode == PlaybackStateCompat.REPEAT_MODE_GROUP) {
+        repeat = ButtonStates.REPEAT_ALL;
+      }
+    }
+    shuffleState = shuffle;
+    repeatState = repeat;
+    savedState = saved;
   }
 
   private List<Custom> readCustoms(List<PlaybackState.CustomAction> raw) {
@@ -451,6 +501,18 @@ final class SpotifyWatcher {
     return speed;
   }
 
+  int shuffleState() {
+    return shuffleState;
+  }
+
+  int repeatState() {
+    return repeatState;
+  }
+
+  int savedState() {
+    return savedState;
+  }
+
   List<Custom> customs() {
     return Collections.unmodifiableList(customs);
   }
@@ -477,8 +539,9 @@ final class SpotifyWatcher {
     if (!artist.isEmpty()) {
       sb.append(" – ").append(artist);
     }
-    sb.append("\nShuffle: ").append(shuffleName(shuffleMode));
-    sb.append("   Repeat: ").append(repeatName(repeatMode));
+    sb.append("\nShuffle: ").append(ButtonStates.shuffleName(shuffleState));
+    sb.append("   Repeat: ").append(ButtonStates.repeatName(repeatState));
+    sb.append("   Saved: ").append(ButtonStates.savedName(savedState));
     return sb.toString();
   }
 
@@ -511,6 +574,9 @@ final class SpotifyWatcher {
     sb.append("Standard repeat: ").append(repeatMode).append(" (").append(repeatName(repeatMode)).append(")")
         .append(standardRepeatOffered() ? ", can be set" : ", setting not offered").append('\n');
     sb.append("Rating type: ").append(ratingType).append('\n');
+    sb.append("Read from Spotify's buttons: shuffle ").append(ButtonStates.shuffleName(shuffleState))
+        .append(", repeat ").append(ButtonStates.repeatName(repeatState)).append(", saved ")
+        .append(ButtonStates.savedName(savedState)).append('\n');
 
     sb.append("Spotify's own buttons (").append(customs.size()).append("):\n");
     int n = 1;
@@ -637,6 +703,24 @@ final class SpotifyWatcher {
     }
   }
 
+  /**
+   * Saves the current song, and only ever saves. When the song is already saved the button is
+   * left alone, so a stray tap on the watch cannot remove a song from the library.
+   */
+  void saveCurrentSong(String from) {
+    if (savedState == ButtonStates.SAVED_YES) {
+      log.add("try", from + ": this song is already saved; left as it is");
+      return;
+    }
+    for (Custom custom : customs) {
+      if (custom.kind == ActionPicker.ADD) {
+        sendCustom(custom.id, from);
+        return;
+      }
+    }
+    log.add("try", from + ": Spotify offers no save button right now");
+  }
+
   boolean sendCustom(String id, String from) {
     MediaController c = controller;
     if (c == null) {
@@ -724,7 +808,8 @@ final class SpotifyWatcher {
   private String signatureLine() {
     StringBuilder sb = new StringBuilder();
     sb.append(stateName(state)).append(" | ").append(title.isEmpty() ? "(no title)" : title);
-    sb.append(" | shuffle ").append(shuffleName(shuffleMode)).append(", repeat ").append(repeatName(repeatMode));
+    sb.append(" | shuffle ").append(ButtonStates.shuffleName(shuffleState)).append(", repeat ")
+        .append(ButtonStates.repeatName(repeatState)).append(", saved ").append(ButtonStates.savedName(savedState));
     sb.append(" | buttons:");
     if (customs.isEmpty()) {
       sb.append(" none");

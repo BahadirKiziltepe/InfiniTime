@@ -161,8 +161,10 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     if (spotify.attached()) {
       watch.setNowPlaying(spotify.title(), spotify.artist(), spotify.album(), spotify.isPlaying(),
           spotify.currentPositionMs(), spotify.speed(), spotify.durationMs());
+      watch.setButtonStates(spotify.shuffleState(), spotify.repeatState(), spotify.savedState());
     } else {
       watch.setNowPlaying("", "", "", false, -1, 1f, 0);
+      watch.setButtonStates(ButtonStates.UNKNOWN, ButtonStates.UNKNOWN, ButtonStates.UNKNOWN);
     }
     changed();
   }
@@ -205,7 +207,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         spotify.press(ActionPicker.REPEAT, FROM_WATCH);
         break;
       case EVENT_ADD:
-        spotify.press(ActionPicker.ADD, FROM_WATCH);
+        spotify.saveCurrentSong(FROM_WATCH);
         break;
       default:
         log.add("watch", "unknown button message: " + eventName(code));

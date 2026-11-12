@@ -66,6 +66,8 @@ final class WatchLink {
   private static final UUID CH_ALBUM = musicUuid(0x05);
   private static final UUID CH_POSITION = musicUuid(0x06);
   private static final UUID CH_LENGTH = musicUuid(0x07);
+  /** Not in stock InfiniTime: three bytes telling the watch what shuffle, repeat and save show. */
+  private static final UUID CH_BUTTONS = musicUuid(0x0d);
   // The standard Bluetooth clock service, which the watch uses to have its time set.
   private static final UUID TIME_SERVICE = UUID.fromString("00001805-0000-1000-8000-00805f9b34fb");
   private static final UUID CH_TIME = UUID.fromString("00002a2b-0000-1000-8000-00805f9b34fb");
@@ -78,13 +80,15 @@ final class WatchLink {
   private static final ParcelUuid ANNOUNCED_HEART_RATE_SERVICE =
       ParcelUuid.fromString("0000180d-0000-1000-8000-00805f9b34fb");
 
-  private static final UUID[] MUSIC = {CH_EVENT, CH_STATUS, CH_ARTIST, CH_TRACK, CH_ALBUM, CH_POSITION, CH_LENGTH};
+  private static final UUID[] MUSIC =
+      {CH_EVENT, CH_STATUS, CH_ARTIST, CH_TRACK, CH_ALBUM, CH_POSITION, CH_LENGTH, CH_BUTTONS};
   private static final UUID[] CLOCK = {CH_TIME, CH_ZONE};
   /**
    * Order in which changes are sent. The clock goes first; position last so it is as fresh as
    * possible. The album is left out: the watch has a slot for it but its screen does not show it.
    */
-  private static final UUID[] SEND_ORDER = {CH_TIME, CH_ZONE, CH_TRACK, CH_ARTIST, CH_LENGTH, CH_STATUS, CH_POSITION};
+  private static final UUID[] SEND_ORDER =
+      {CH_TIME, CH_ZONE, CH_TRACK, CH_ARTIST, CH_LENGTH, CH_STATUS, CH_BUTTONS, CH_POSITION};
 
   private static final String PREFS = "watch";
   private static final String KEY_ADDRESS = "address";
@@ -799,6 +803,15 @@ final class WatchLink {
     pump();
   }
 
+  /**
+   * Tells the watch what the player's shuffle, repeat and save buttons show (ButtonStates values).
+   * Watch builds without the second row of buttons do not have this channel; it is then skipped.
+   */
+  void setButtonStates(int shuffle, int repeat, int saved) {
+    desired.put(CH_BUTTONS, new byte[] {(byte) shuffle, (byte) repeat, (byte) saved});
+    pump();
+  }
+
   private long positionNowMs() {
     if (npPositionMs < 0) {
       return -1;
@@ -1113,6 +1126,9 @@ final class WatchLink {
     }
     if (CH_LENGTH.equals(id)) {
       return "length";
+    }
+    if (CH_BUTTONS.equals(id)) {
+      return "button states";
     }
     if (CH_TIME.equals(id)) {
       return "clock";
