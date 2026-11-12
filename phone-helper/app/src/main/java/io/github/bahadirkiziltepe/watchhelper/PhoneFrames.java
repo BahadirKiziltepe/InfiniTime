@@ -48,9 +48,18 @@ final class PhoneFrames {
   static final int LIST_CONTACTS = 4;
   /** The songs that were played last, newest first. */
   static final int LIST_HISTORY = 5;
+  /** The phone's call history, newest first (watch build 16 and newer). */
+  static final int LIST_CALLS = 6;
+  static final int LIST_LAST = LIST_CALLS;
   /** How many rows the watch shows at once, and so how many a page holds. */
   static final int ROWS_PER_PAGE = 4;
   static final int MAX_ROW = 33;
+  /**
+   * A row made of two lines (a row of the call history): this many characters fit on a line of the
+   * watch's screen, and this many bytes are kept for the two lines and the line break between them.
+   */
+  static final int MAX_ROW_LINE = 19;
+  static final int MAX_ROW_TWO_LINES = 40;
   static final int MAX_LIST_TITLE = 17;
   static final int MAX_NOTE = 72;
   static final int MAX_RESULT = 17;
@@ -60,6 +69,8 @@ final class PhoneFrames {
   static final int ROW_PLAYING = 0x02;
   /** A playlist whose songs cannot be listed. */
   static final int ROW_CLOSED = 0x04;
+  /** A call that was missed. The watch shows it in red. */
+  static final int ROW_MISSED = 0x08;
   static final int RESULT_DONE = 0;
   static final int RESULT_FAILED = 1;
   /** The list is no longer the one the watch's page came from. The watch asks for the page again. */
@@ -76,16 +87,37 @@ final class PhoneFrames {
   private static final int ICON_BEGIN = 0x2a;
   private static final int ICON_DATA = 0x2b;
   private static final int ICON_END = 0x2c;
+  // The weather, in answer to the watch asking for it: the hours first, then the rest.
+  private static final int WEATHER = 0x2d;
+  private static final int WEATHER_HOURS = 0x2e;
+  /** What the watch is told along with the numbers, or in place of them. */
+  static final int WEATHER_FRESH = 1;
+  /** The numbers are the last ones there were; newer ones could not be had. */
+  static final int WEATHER_OLD = 2;
+  static final int WEATHER_NO_PERMISSION = 0x10;
+  static final int WEATHER_NO_PLACE = 0x11;
+  static final int WEATHER_NO_ANSWER = 0x12;
+  /** How many hours of rain chance the watch shows. */
+  static final int WEATHER_MAX_HOURS = 10;
+  /** Stands for a percentage that is not known. */
+  static final int UNKNOWN = 0xff;
   /** Width and height of that picture in pixels. Each pixel takes half a byte. */
   static final int MARK_ICON_SIZE = 20;
 
-  /** One row of a list page. */
+  /** One row of a list page: a text the watch wraps over two lines, or two lines shown as they are. */
   static final class Row {
     final String text;
+    /** The second line, or null for a row that is one text. */
+    final String second;
     final int flags;
 
     Row(String text, int flags) {
+      this(text, null, flags);
+    }
+
+    Row(String text, String second, int flags) {
       this.text = text;
+      this.second = second;
       this.flags = flags;
     }
   }
@@ -231,7 +263,7 @@ final class PhoneFrames {
     }
     for (int slot = 0; slot < count; slot++) {
       Row row = rows.get(slot);
-      byte[] text = WatchText.encode(row.text == null ? "" : row.text, MAX_ROW);
+      byte[] text = rowBytes(row);
       int first = Math.min(text.length, MAX_MESSAGE - 4);
       out.add(piece(new byte[] {(byte) LIST_ROW, (byte) token, (byte) slot, (byte) row.flags}, text, 0, first));
       for (int at = first; at < text.length;) {
@@ -248,6 +280,60 @@ final class PhoneFrames {
     }
     out.add(new byte[] {(byte) LIST_END, (byte) token});
     return out;
+  }
+
+  /** The text of a row as the watch gets it. */
+  static byte[] rowBytes(Row row) {
+    if (row.second == null) {
+      return WatchText.encode(row.text == null ? "" : row.text, MAX_ROW);
+    }
+    // Two lines: each is cut to what fits on a line, so the watch never has to wrap them, and the
+    // second line (what kind of call, and when) is never the one to lose out.
+    byte[] second = WatchText.line(row.second, MAX_ROW_LINE, MAX_ROW_TWO_LINES - 2);
+    byte[] first = WatchText.line(row.text == null ? "" : row.text, MAX_ROW_LINE, MAX_ROW_TWO_LINES - 1 - second.length);
+    byte[] out = new byte[first.length + 1 + second.length];
+    System.arraycopy(first, 0, out, 0, first.length);
+    out[first.length] = '\n';
+    System.arraycopy(second, 0, out, first.length + 1, second.length);
+    return out;
+  }
+
+  /**
+   * The weather for the watch (watch build 16 and newer). {@code status} is WEATHER_FRESH or
+   * WEATHER_OLD. Temperatures are whole degrees in the unit {@code fahrenheit} says, the wind in
+   * miles or kilometres per hour, humidity and the day's chance of rain in percent or UNKNOWN.
+   * {@code hour} and {@code minute} say when the numbers are from. {@code hourly} holds the chance
+   * of rain for the hour {@code firstHour} (0 to 23) that is under way and the hours after it.
+   */
+  static List<byte[]> weather(int status, boolean fahrenheit, boolean milesPerHour, int temperature, int feelsLike,
+      int wind, int humidity, int rainToday, int hour, int minute, int firstHour, int[] hourly) {
+    List<byte[]> out = new ArrayList<>();
+    int count = Math.min(hourly == null ? 0 : hourly.length, WEATHER_MAX_HOURS);
+    byte[] hours = new byte[3 + count];
+    hours[0] = (byte) WEATHER_HOURS;
+    hours[1] = (byte) clamp(firstHour, 0, 23);
+    hours[2] = (byte) count;
+    for (int i = 0; i < count; i++) {
+      hours[3 + i] = (byte) percent(hourly[i]);
+    }
+    out.add(hours);
+    int t = clamp(temperature, -999, 999);
+    int f = clamp(feelsLike, -999, 999);
+    out.add(new byte[] {(byte) WEATHER, (byte) status, (byte) ((fahrenheit ? 1 : 0) | (milesPerHour ? 2 : 0)), (byte) t,
+        (byte) (t >> 8), (byte) f, (byte) (f >> 8), (byte) clamp(wind, 0, 250), (byte) percent(humidity),
+        (byte) percent(rainToday), (byte) clamp(hour, 0, 23), (byte) clamp(minute, 0, 59)});
+    return out;
+  }
+
+  /** Tells the watch that there is no weather to show, and why: one of the WEATHER_NO_ values. */
+  static List<byte[]> noWeather(int status) {
+    List<byte[]> out = new ArrayList<>();
+    out.add(new byte[] {(byte) WEATHER, (byte) status});
+    return out;
+  }
+
+  private static int percent(int value) {
+    return value < 0 || value > 100 ? UNKNOWN : value;
   }
 
   /** What became of something the watch asked for: one of the RESULT_ values and a few words. */

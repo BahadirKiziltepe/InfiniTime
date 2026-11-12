@@ -28,6 +28,7 @@
 #include "displayapp/screens/BatteryInfo.h"
 #include "displayapp/screens/Steps.h"
 #include "displayapp/screens/PhoneList.h"
+#include "displayapp/screens/PhoneWeather.h"
 #include "displayapp/screens/Dice.h"
 #include "displayapp/screens/Weather.h"
 #include "displayapp/screens/PassKey.h"
@@ -45,6 +46,7 @@
 #include "displayapp/screens/settings/SettingWatchFace.h"
 #include "displayapp/screens/settings/SettingTimeFormat.h"
 #include "displayapp/screens/settings/SettingWeatherFormat.h"
+#include "displayapp/screens/settings/SettingNotifications.h"
 #include "displayapp/screens/settings/SettingWakeUp.h"
 #include "displayapp/screens/settings/SettingDisplay.h"
 #include "displayapp/screens/settings/SettingSteps.h"
@@ -275,6 +277,14 @@ void DisplayApp::Refresh() {
         motorController.RunForDuration(markBuzzLeft > 0 ? 250 : 200);
       }
 
+      // A battery that has run low gets short buzzes with a pause between them, so that it does
+      // not feel like a notification: two at 15 %, three at 5 %.
+      if (batteryBuzzLeft > 0 && (xTaskGetTickCount() - batteryBuzzTick) >= pdMS_TO_TICKS(450)) {
+        batteryBuzzTick = xTaskGetTickCount();
+        batteryBuzzLeft--;
+        motorController.RunForDuration(200);
+      }
+
       // A call keeps the screen on, whichever screen is showing, so that it can be ended from the
       // wrist at any moment. The watch does not go to sleep by itself then, and the light is not
       // turned down either. Only the side button switches the screen off (see ButtonPushed); after
@@ -358,7 +368,8 @@ void DisplayApp::Refresh() {
         if (currentApp == Apps::Launcher || currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview ||
             currentApp == Apps::Call || currentApp == Apps::QuickSettings || currentApp == Apps::Settings ||
             currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs ||
-            currentApp == Apps::History || currentApp == Apps::Contacts || currentApp == Apps::Steps) {
+            currentApp == Apps::History || currentApp == Apps::Contacts || currentApp == Apps::Calls ||
+            currentApp == Apps::Steps || currentApp == Apps::PhoneWeather) {
           LoadScreen(Apps::Clock, DisplayApp::FullRefreshDirections::None);
           // The main screen is the start of every way back again. Without this, each time the watch
           // fell asleep on one of these screens an entry was left behind, until the list was full and
@@ -402,6 +413,14 @@ void DisplayApp::Refresh() {
         // (a reply from Claude). The watch buzzes for it; there is nothing else to show.
         markBuzzLeft = 3;
         markBuzzTick = xTaskGetTickCount() - pdMS_TO_TICKS(200);
+        lv_disp_trig_activity(nullptr);
+        break;
+      case Messages::BatteryLow:
+      case Messages::BatteryCritical:
+        // The watch's battery or the phone's has run down to 15 % or to 5 %. Two or three short
+        // buzzes; the main screen shows the number in yellow or red.
+        batteryBuzzLeft = msg == Messages::BatteryCritical ? 3 : 2;
+        batteryBuzzTick = xTaskGetTickCount() - pdMS_TO_TICKS(450);
         lv_disp_trig_activity(nullptr);
         break;
       case Messages::ShakeToSleep:
@@ -502,8 +521,8 @@ void DisplayApp::Refresh() {
           // How the screens lie next to each other. Up and down move between the rows, and a
           // row continues to the right:
           //
-          //   settings       ->  steps
-          //   notifications  ->  contacts
+          //   weather  <-  settings       ->  steps
+          //                notifications  ->  contacts  ->  call history
           //   (the call, while there is one)
           //   MAIN SCREEN        left and right change the volume there
           //   history  <-  queue  ->  playlists  ->  songs
@@ -537,6 +556,9 @@ void DisplayApp::Refresh() {
             LoadNewScreen(Apps::Contacts, DisplayApp::FullRefreshDirections::LeftAnim);
           } else if (currentApp == Apps::QuickSettings && gesture == TouchEvents::SwipeLeft) {
             LoadNewScreen(Apps::Steps, DisplayApp::FullRefreshDirections::LeftAnim);
+          } else if (currentApp == Apps::QuickSettings && gesture == TouchEvents::SwipeRight) {
+            // The weather is to the left of the settings, the steps to their right
+            LoadNewScreen(Apps::PhoneWeather, DisplayApp::FullRefreshDirections::RightAnim);
           }
         } else {
           lvgl.CancelTap();
@@ -696,12 +718,14 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
     case Apps::Playlists:
     case Apps::Songs:
     case Apps::Contacts:
+    case Apps::Calls:
     case Apps::History: {
       using Kinds = Controllers::PhoneLists::Kinds;
       const Kinds kind = app == Apps::Queue       ? Kinds::Queue
                          : app == Apps::Playlists ? Kinds::Playlists
                          : app == Apps::Songs     ? Kinds::Songs
                          : app == Apps::History   ? Kinds::History
+                         : app == Apps::Calls     ? Kinds::Calls
                                                   : Kinds::Contacts;
       currentScreen = std::make_unique<Screens::PhoneList>(this,
                                                            kind,
@@ -716,10 +740,13 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
                                                                dateTimeController,
                                                                brightnessController,
                                                                motorController,
-                                                               motionController,
                                                                settingsController,
                                                                bleController,
-                                                               alarmController);
+                                                               alarmController,
+                                                               systemTask->nimble().music());
+      break;
+    case Apps::PhoneWeather:
+      currentScreen = std::make_unique<Screens::PhoneWeather>(systemTask->nimble().music(), bleController, settingsController);
       break;
     case Apps::Settings:
       currentScreen = std::make_unique<Screens::Settings>(this, settingsController);
@@ -738,6 +765,9 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
       break;
     case Apps::SettingWeatherFormat:
       currentScreen = std::make_unique<Screens::SettingWeatherFormat>(settingsController);
+      break;
+    case Apps::SettingNotifications:
+      currentScreen = std::make_unique<Screens::SettingNotifications>(settingsController);
       break;
     case Apps::SettingWakeUp:
       currentScreen = std::make_unique<Screens::SettingWakeUp>(settingsController);

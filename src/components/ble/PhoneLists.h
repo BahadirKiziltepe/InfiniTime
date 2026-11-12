@@ -10,7 +10,8 @@ namespace Pinetime {
   namespace Controllers {
     /**
      * Lists that live on the phone and are shown on the watch one page at a time: the play queue,
-     * the playlists, the songs of one playlist and the people the wearer chose to call from the watch.
+     * the playlists, the songs of one playlist, the people the wearer chose to call from the watch
+     * and the phone's call history.
      *
      * The watch asks the Watch Helper phone app for a page (see MusicService::RequestList). The answer
      * arrives in small pieces on the Bluetooth task and is put together here; a screen on the display
@@ -19,13 +20,15 @@ namespace Pinetime {
      */
     class PhoneLists {
     public:
-      // History is the list of songs that were played last, newest first
-      enum class Kinds : uint8_t { None = 0, Queue = 1, Playlists = 2, Songs = 3, Contacts = 4, History = 5 };
-      static constexpr uint8_t LastKind = static_cast<uint8_t>(Kinds::History);
+      // History is the list of songs that were played last, newest first. Calls is the phone's call
+      // history, newest first: who it was, and under that whether the call was made, received or missed.
+      enum class Kinds : uint8_t { None = 0, Queue = 1, Playlists = 2, Songs = 3, Contacts = 4, History = 5, Calls = 6 };
+      static constexpr uint8_t LastKind = static_cast<uint8_t>(Kinds::Calls);
 
       static constexpr uint8_t RowsPerPage = 4;
-      // A row's text: two lines on the screen
-      static constexpr uint8_t RowSize = 33;
+      // A row's text: two lines on the screen. A row of the call history is two full lines with a
+      // line break between them, which is what this size is for.
+      static constexpr uint8_t RowSize = 40;
       static constexpr uint8_t TitleSize = 17;
       // A sentence shown in place of the rows, for example why a list is empty
       static constexpr uint8_t NoteSize = 72;
@@ -37,6 +40,8 @@ namespace Pinetime {
       static constexpr uint8_t RowPlaying = 0x02;
       // A playlist whose songs Spotify does not hand out (one the wearer only follows)
       static constexpr uint8_t RowClosed = 0x04;
+      // A call that was missed
+      static constexpr uint8_t RowMissed = 0x08;
 
       // What the phone says about something the watch asked it to do
       static constexpr uint8_t ResultDone = 0;

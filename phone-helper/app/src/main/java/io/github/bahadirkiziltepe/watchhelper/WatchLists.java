@@ -11,8 +11,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 
 /**
- * Answers the watch when it asks for a page of the queue, the playlists, a playlist's songs or
- * the people to call, and does what the watch asks to be done with a row.
+ * Answers the watch when it asks for a page of the queue, the playlists, a playlist's songs, the
+ * people to call or the call history, and does what the watch asks to be done with a row.
  *
  * <p>Anything that needs Spotify's web service runs on one background thread, one request after
  * the other. The answers go back to the watch from the main thread, like everything else.
@@ -36,6 +36,7 @@ final class WatchLists {
   private final ContactStore contacts;
   private final CallWatcher calls;
   private final SpotifyWatcher spotify;
+  private final CallHistory history;
 
   private final ExecutorService io = Executors.newSingleThreadExecutor(work -> {
     Thread thread = new Thread(work, "watch-lists");
@@ -43,7 +44,7 @@ final class WatchLists {
     return thread;
   });
   /** The newest request number per list. An answer to an older request would only be thrown away by the watch. */
-  private final AtomicIntegerArray newest = new AtomicIntegerArray(PhoneFrames.LIST_HISTORY + 1);
+  private final AtomicIntegerArray newest = new AtomicIntegerArray(PhoneFrames.LIST_LAST + 1);
 
   // The song the mark for "Spotify picked this" is being worked out for.
   private volatile int songRound;
@@ -58,7 +59,7 @@ final class WatchLists {
   private volatile int picksFound;
 
   WatchLists(Handler main, EventLog log, WatchLink watch, SpotifyAccount account, MusicLibrary library,
-      ContactStore contacts, CallWatcher calls, SpotifyWatcher spotify) {
+      ContactStore contacts, CallWatcher calls, SpotifyWatcher spotify, CallHistory history) {
     this.main = main;
     this.log = log;
     this.watch = watch;
@@ -67,6 +68,7 @@ final class WatchLists {
     this.contacts = contacts;
     this.calls = calls;
     this.spotify = spotify;
+    this.history = history;
   }
 
   /** Somebody logged in or out: what is known about the old account is of no use. */
@@ -98,7 +100,7 @@ final class WatchLists {
   }
 
   private static boolean known(int kind) {
-    return kind >= PhoneFrames.LIST_QUEUE && kind <= PhoneFrames.LIST_HISTORY;
+    return kind >= PhoneFrames.LIST_QUEUE && kind <= PhoneFrames.LIST_LAST;
   }
 
   private void page(final int kind, final int token, final int offset, final int parent) {
@@ -109,6 +111,10 @@ final class WatchLists {
     newest.set(kind, token);
     if (kind == PhoneFrames.LIST_CONTACTS) {
       send(contactsPage(token, offset));
+      return;
+    }
+    if (kind == PhoneFrames.LIST_CALLS) {
+      send(callsPage(token, offset));
       return;
     }
     io.execute(() -> {
@@ -137,6 +143,10 @@ final class WatchLists {
     actionsAsked++;
     if (kind == PhoneFrames.LIST_CONTACTS) {
       watch.sendPhone(call(action, index, snapshot));
+      return;
+    }
+    if (kind == PhoneFrames.LIST_CALLS) {
+      watch.sendPhone(callBack(action, index, snapshot));
       return;
     }
     io.execute(() -> {
@@ -170,6 +180,49 @@ final class WatchLists {
     }
     ContactStore.Person person = all.get(index);
     String problem = calls.place(person.name, person.number);
+    if (problem != null) {
+      return PhoneFrames.listResult(kind, PhoneFrames.RESULT_FAILED, problem);
+    }
+    actionsDone++;
+    return PhoneFrames.listResult(kind, PhoneFrames.RESULT_DONE, "Calling");
+  }
+
+  // ---------------------------------------------------------------- the call history
+
+  private List<byte[]> callsPage(int token, int offset) {
+    int kind = PhoneFrames.LIST_CALLS;
+    // Asking for the first page is opening the list: read the call log again.
+    List<CallHistory.Entry> all = offset == 0 || history.shown().isEmpty() ? history.refresh() : history.shown();
+    if (all == null) {
+      return PhoneFrames.listPage(kind, token, 0, 0, history.generation(), "",
+          "The phone app may not read the call history. Open it, tap Allow calls.", null);
+    }
+    int start = clamp(offset, all.size());
+    List<PhoneFrames.Row> rows = new ArrayList<>();
+    for (int i = start; i < all.size() && rows.size() < PhoneFrames.ROWS_PER_PAGE; i++) {
+      CallHistory.Entry entry = all.get(i);
+      rows.add(new PhoneFrames.Row(history.label(entry), history.second(entry),
+          CallRows.missed(entry.type) ? PhoneFrames.ROW_MISSED : 0));
+    }
+    String note = all.isEmpty() ? "No calls in the phone's call history." : "";
+    return PhoneFrames.listPage(kind, token, start, all.size(), history.generation(), "", note, rows);
+  }
+
+  /** Calls the person of a row of the call history, the same way as somebody from the watch list. */
+  private List<byte[]> callBack(int action, int index, int snapshot) {
+    int kind = PhoneFrames.LIST_CALLS;
+    List<CallHistory.Entry> all = history.shown();
+    if (snapshot != history.generation() || index >= all.size()) {
+      return PhoneFrames.listResult(kind, PhoneFrames.RESULT_STALE, "");
+    }
+    if (action != ACTION_TAP) {
+      return PhoneFrames.listResult(kind, PhoneFrames.RESULT_FAILED, "");
+    }
+    CallHistory.Entry entry = all.get(index);
+    if (entry.number.isEmpty()) {
+      return PhoneFrames.listResult(kind, PhoneFrames.RESULT_FAILED, "No number");
+    }
+    String problem = calls.place(history.label(entry), entry.number);
     if (problem != null) {
       return PhoneFrames.listResult(kind, PhoneFrames.RESULT_FAILED, problem);
     }

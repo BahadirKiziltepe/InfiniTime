@@ -34,6 +34,25 @@
     <!-- Turn the volume of a call up or down from the watch. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- The sound button on the watch switches the phone between sound, vibrate and mute. Android
+         ties going to mute, and back, to Do Not Disturb, which takes this. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
+    <!-- Find my phone: the phone vibrates as well as rings. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- The weather on the watch is the weather where the phone is. Only the rough position is
+         asked for; it is rounded to about a kilometre, sent to the weather service and nowhere
+         else, and never written to the log or the report. "Background" is what Android calls
+         looking while the app's screen is closed, which is when the watch asks. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Since Android 17 an app may only change a volume or the sound mode, or make a sound, in
+         the background while it runs a foreground service. See LinkService. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
@@ -90,6 +109,13 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Keeps the app in the state Android 17 demands before it lets an app change the volume
+             or the sound mode, or ring, while its screen is closed. It does nothing else. -->
+        <service
+            android:name=".LinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- Sends a watch build to the watch. Only ever started by this app. -->
         <service

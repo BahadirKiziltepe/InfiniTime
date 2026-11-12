@@ -10,6 +10,9 @@ namespace Pinetime {
       OnNewNotification,
       OnNewCall,
       OnWaitingMark,
+      // The watch's battery or the phone's has just run down to 15 %, or to 5 %
+      OnBatteryLow,
+      OnBatteryCritical,
       BleConnected,
       BleFirmwareUpdateStarted,
       BleFirmwareUpdateFinished,

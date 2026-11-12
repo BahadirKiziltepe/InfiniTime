@@ -84,6 +84,46 @@ final class WatchText {
     return cut.getBytes(StandardCharsets.UTF_8);
   }
 
+  /**
+   * UTF-8 bytes of the folded text as one line of the watch's screen: at most {@code maxChars}
+   * characters and at most {@code maxBytes} bytes, ending in "..." when something had to be left out.
+   */
+  static byte[] line(String in, int maxChars, int maxBytes) {
+    String text = fold(in);
+    if (maxChars <= 0 || maxBytes <= 0) {
+      return new byte[0];
+    }
+    byte[] all = text.getBytes(StandardCharsets.UTF_8);
+    if (text.codePointCount(0, text.length()) <= maxChars && all.length <= maxBytes) {
+      return all;
+    }
+    boolean dots = maxChars > ELLIPSIS.length() && maxBytes > ELLIPSIS.length();
+    int charBudget = dots ? maxChars - ELLIPSIS.length() : maxChars;
+    int byteBudget = dots ? maxBytes - ELLIPSIS.length() : maxBytes;
+    int usedChars = 0;
+    int usedBytes = 0;
+    int end = 0;
+    for (int i = 0; i < text.length();) {
+      int cp = text.codePointAt(i);
+      int size = utf8Length(cp);
+      if (usedChars + 1 > charBudget || usedBytes + size > byteBudget) {
+        break;
+      }
+      usedChars++;
+      usedBytes += size;
+      i += Character.charCount(cp);
+      end = i;
+    }
+    String cut = text.substring(0, end);
+    while (cut.endsWith(" ")) {
+      cut = cut.substring(0, cut.length() - 1);
+    }
+    if (dots) {
+      cut = cut + ELLIPSIS;
+    }
+    return cut.getBytes(StandardCharsets.UTF_8);
+  }
+
   /** Four bytes, most significant first: the format the watch expects for positions and lengths. */
   static byte[] int32(long value) {
     long v = Math.max(0, Math.min(value, Integer.MAX_VALUE));

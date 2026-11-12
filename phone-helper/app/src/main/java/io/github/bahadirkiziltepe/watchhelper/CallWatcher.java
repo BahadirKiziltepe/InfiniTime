@@ -202,7 +202,7 @@ final class CallWatcher {
   }
 
   /** The name the phone's contacts have for a number, or nothing. */
-  private String contactName(String number) {
+  String contactName(String number) {
     if (!has(Manifest.permission.READ_CONTACTS)) {
       return "";
     }
@@ -511,16 +511,17 @@ final class CallWatcher {
   }
 
   /**
-   * Starts a phone call to one of the people on the watch list. Returns null if Android took the
+   * Starts a phone call to one of the people on the watch list, or to somebody from the call
+   * history. Returns null if Android took the
    * call, otherwise a few words for the watch on why not.
    */
   String place(String name, String number) {
     if (!has(Manifest.permission.CALL_PHONE)) {
-      note("watch: call someone from the watch list, but making calls is not allowed yet");
+      note("watch: call someone, but making calls is not allowed yet");
       return "Allow calls first";
     }
     if (state() != PhoneFrames.CALL_NONE) {
-      note("watch: call someone from the watch list, but there is a call already");
+      note("watch: call someone, but there is a call already");
       return "Already in a call";
     }
     try {
@@ -531,7 +532,7 @@ final class CallWatcher {
       telecom.placeCall(Uri.fromParts("tel", number, null), new Bundle());
       placedName = name == null ? "" : name;
       placedAt = android.os.SystemClock.elapsedRealtime();
-      note("watch: call someone from the watch list (asked Android)");
+      note("watch: call someone (asked Android)");
       return null;
     } catch (RuntimeException e) {
       log.add("call", "Android would not start the call: " + e.getClass().getSimpleName());

@@ -23,7 +23,7 @@ namespace Pinetime {
 
       /**
        * One page of a list that lives on the phone: the play queue, the playlists, the songs of a
-       * playlist, or the people the wearer chose to call from the watch.
+       * playlist, the people the wearer chose to call from the watch, or the phone's call history.
        *
        * - Swipe up for the next page, swipe down for the one before.
        * - Queue: only shown. It hangs below the main screen: swiping down on its first page goes back
@@ -34,6 +34,9 @@ namespace Pinetime {
        *   queue, a hold plays it on its own, after which Spotify carries on with songs like it.
        * - Contacts: a tap asks "Call ...?". A second tap makes the phone place the call; holding the
        *   screen, or a swipe, takes the question back. It also goes away by itself after ten seconds.
+       * - Calls (the call history, to the right of the contacts): who it was, and under that whether
+       *   the call was made, received or missed and when. Missed calls are red. A tap asks
+       *   "Call ...?" exactly as the contacts do.
        * - A star in front of a song means Spotify picked it itself (Smart Shuffle), the play sign
        *   means it is the song that is playing.
        *
@@ -113,7 +116,7 @@ namespace Pinetime {
         lv_color_t toastColor = LV_COLOR_WHITE;
         TickType_t toastTick = 0;
 
-        // Contacts: the person the wearer is being asked about, and whether the call was asked for
+        // Contacts and calls: the person the wearer is being asked about, and whether the call was asked for
         bool confirming = false;
         bool calling = false;
         uint16_t confirmIndex = 0;

@@ -14,7 +14,14 @@ The Android companion for the watch firmware in this repository. It is deliberat
 - shows the play queue, the playlists and their songs on the watch, plays a song in its
   playlist or adds it to the queue from there, and marks the songs Spotify picked itself
   (Smart Shuffle). This part needs Spotify's web service; see below
-- keeps a short list of people, chosen in the app, that the watch can call
+- keeps a short list of people, chosen in the app, that the watch can call, and suggests
+  people from the phone's contacts who called and are not on it yet
+- shows the phone's call history on the watch (made, received, missed), from where a person
+  can be called back
+- follows the phone's sound mode (sound, vibrate, mute) for the sound button on the watch,
+  and changes it when that button is tapped
+- rings at full volume when the watch's "find my phone" button is tapped, also on mute
+- fetches the weather for where the phone is, for the watch's weather screen; see below
 - installs watch builds from this repository's Releases page ("Update watch")
 - shows what Spotify offers to other apps and produces a report, used to wire up the
   watch's shuffle / repeat / add buttons
@@ -22,6 +29,39 @@ The Android companion for the watch firmware in this repository. It is deliberat
 What a notification says, and who is calling, goes from the phone to the watch over
 Bluetooth and nowhere else. The app's log and report only note that something was sent.
 Of the people chosen for the watch only the names are sent to it; the numbers stay on the phone.
+The same goes for the call history: the watch gets a name (or the number, if the phone has no
+name for it), the kind of call and the time.
+
+## Weather
+
+The watch's weather screen shows the temperature, what it feels like, wind, humidity, the
+chance of rain for the day and for each of the next ten hours. The numbers come from
+[Open-Meteo](https://open-meteo.com) (weather data by Open-Meteo.com, CC BY 4.0), which needs
+no account. "Rain" is the service's chance of precipitation, so it counts snow as well.
+
+The weather is for where the phone is. The app only asks Android for the rough position,
+rounds it to two decimals (about a kilometre) and sends that to the weather service, over
+an encrypted connection, and nowhere else. The rounded position is kept in the app's
+private storage and is never written to the log or the report. Android only says where
+the phone is while the app's screen is closed if "Allow all the time" was picked; without
+it the watch gets the weather for where the phone was when the screen was last open.
+
+## The foreground service
+
+Since Android 17 an app may only change a volume or the phone's sound mode, or make a sound,
+while its screen is open or while it runs a foreground service; in the background such
+requests are dropped without an error. The watch asks for exactly these things while the
+phone is in a pocket (volume, sound mode, find my phone), so the app keeps a foreground
+service of the "connected device" kind running. It does nothing else. The app does not ask
+for permission to show notifications, so the service's notification does not appear.
+
+## Sound mode and Do Not Disturb
+
+Asking Android for a ringer mode is one call, but phones differ in what they make of it.
+Plain Android switches Do Not Disturb on when an app asks for silence. `SoundSwitch.java`
+therefore asks, reads back what the phone really did, tries the other ways there are, and
+puts Do Not Disturb back the way it was whenever the phone holds the mode without it. The
+watch is always told the mode the phone is really in.
 
 ## Playlists and queue: Spotify's web service
 
@@ -67,6 +107,11 @@ with JDK 17, Gradle 8.10+ and the Android SDK (platform 35, build-tools 35.0.0).
 | `SpotifyAccount.java`, `Http.java` | The login to Spotify's web service, and one web request |
 | `MusicLibrary.java` | Playlists, songs and queue from Spotify's web service; play and add to queue |
 | `WatchLists.java` | Answers the watch's requests for pages of its lists |
-| `ContactStore.java` | The people chosen for the watch |
+| `ContactStore.java`, `SuggestionStore.java` | The people chosen for the watch, and callers suggested for it |
+| `CallHistory.java`, `CallRows.java` | The phone's call history for the watch, and the words for a call |
+| `SoundMode.java`, `SoundSwitch.java` | Follows and changes the phone's sound mode |
+| `PhoneFinder.java` | Rings so the phone can be found |
+| `Weather.java`, `WeatherReport.java` | Where the phone is, the weather there, and the answer to the watch |
+| `LinkService.java` | The foreground service Android 17 asks for |
 | `MainActivity.java`, `Ui.java`, `Report.java` | The one screen, how it looks, and the report |
 | `WatchText.java`, `WatchTime.java`, `ActionPicker.java`, `PhoneFrames.java` | Small pure helpers |

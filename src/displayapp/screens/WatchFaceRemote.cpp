@@ -42,6 +42,17 @@ namespace {
   constexpr lv_coord_t waitingDotGap = 6;
 
   constexpr lv_coord_t textWidth = 232;
+
+  // Writes a battery level at the end of "out": as it is, or wrapped in the colour it is shown in
+  // when the battery is running low (yellow from 15 % down, red from 5 % down). The watch buzzes
+  // at those two marks; see LowBatteryWatch.
+  size_t AddLevel(char* out, size_t size, size_t used, uint8_t percent) {
+    using Watch = Pinetime::Controllers::LowBatteryWatch;
+    const char* color = percent <= Watch::Critical ? "ff4040" : percent <= Watch::Low ? "ffd000" : nullptr;
+    const int written = color != nullptr ? lv_snprintf(out + used, size - used, "#%s %d#", color, static_cast<int>(percent))
+                                         : lv_snprintf(out + used, size - used, "%d", static_cast<int>(percent));
+    return written > 0 && used + static_cast<size_t>(written) < size ? used + static_cast<size_t>(written) : used;
+  }
   constexpr lv_coord_t playerIconOffsetX = 8;
   constexpr lv_coord_t progressOffsetX = -8;
   constexpr lv_coord_t progressWidth = 190;
@@ -138,6 +149,8 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   // watch's alone while the phone has not said. Under it, in orange, the phone's media volume in
   // the phone's own steps, and left of that the new-notification marker.
   labelBattery = lv_label_create(lv_scr_act(), nullptr);
+  // A number can carry its own colour: see AddLevel
+  lv_label_set_recolor(labelBattery, true);
   lv_label_set_text_static(labelBattery, "");
   lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, 0, 0);
 
@@ -313,11 +326,16 @@ void WatchFaceRemote::UpdateLevels() {
   if (watchBattery != shownWatchBattery || phoneBattery != shownPhoneBattery) {
     shownWatchBattery = watchBattery;
     shownPhoneBattery = phoneBattery;
+    char levels[40];
+    size_t used = 0;
+    levels[0] = '\0';
     if (phoneBattery <= 100) {
-      lv_label_set_text_fmt(labelBattery, "%d|%d", phoneBattery, watchBattery);
-    } else {
-      lv_label_set_text_fmt(labelBattery, "%d", watchBattery);
+      used = AddLevel(levels, sizeof(levels), used, phoneBattery);
+      levels[used++] = '|';
+      levels[used] = '\0';
     }
+    AddLevel(levels, sizeof(levels), used, watchBattery);
+    lv_label_set_text(labelBattery, levels);
     lv_obj_realign(labelBattery);
     batteryMoved = true;
   }

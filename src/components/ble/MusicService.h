@@ -29,6 +29,7 @@
 #undef max
 #undef min
 #include <FreeRTOS.h>
+#include "components/battery/LowBatteryWatch.h"
 #include "components/ble/NotificationManager.h"
 #include "components/ble/PhoneLists.h"
 
@@ -59,6 +60,16 @@ namespace Pinetime {
       void ActOnRow(PhoneLists::Kinds kind, uint8_t action, uint16_t index, uint16_t parent, uint8_t snapshot);
       // Asks the phone to clear one of its notifications. The phone then takes it back from the watch too.
       void DismissNotification(uint16_t phoneId);
+
+      // Asks the phone for the weather where it is. The answer arrives in ReadWeather().
+      void RequestWeather();
+
+      // Asks the phone to change its sound mode (one of the Sound values below). The phone reports
+      // the mode it really ends up in; see getPhoneSoundMode().
+      void SetPhoneSoundMode(uint8_t mode);
+
+      // Makes the phone ring at full volume so it can be found, or stops that
+      void FindPhone(bool ring);
 
       static constexpr uint8_t ActionTap = 1;
       static constexpr uint8_t ActionHold = 2;
@@ -111,6 +122,12 @@ namespace Pinetime {
       static constexpr uint8_t EVENT_LIST_PAGE = 0x30;
       static constexpr uint8_t EVENT_LIST_ACTION = 0x31;
       static constexpr uint8_t EVENT_NOTIFICATION_DISMISS = 0x32;
+      //   0x33 the weather, please (one more byte, not used yet)
+      //   0x34 put the phone in a sound mode: 0 mute, 1 vibrate, 2 sound
+      //   0x35 ring so the phone can be found (1), or stop ringing (0)
+      static constexpr uint8_t EVENT_WEATHER = 0x33;
+      static constexpr uint8_t EVENT_SOUND_MODE = 0x34;
+      static constexpr uint8_t EVENT_FIND_PHONE = 0x35;
 
       // What the player's shuffle, repeat and "save this song" buttons currently show, as told
       // by the phone in one three-byte write. Unknown until the phone has sent it.
@@ -148,6 +165,79 @@ namespace Pinetime {
 
       uint8_t getPhoneBattery() const {
         return phoneBattery;
+      }
+
+      // The phone's sound mode as the phone itself reports it (the eighth byte of the buttons
+      // characteristic): sound, vibrate or mute. StateUnknown until the phone app has sent it.
+      static constexpr uint8_t SoundMute = 0;
+      static constexpr uint8_t SoundVibrate = 1;
+      static constexpr uint8_t SoundOn = 2;
+
+      uint8_t getPhoneSoundMode() const {
+        return phoneSoundMode;
+      }
+
+      // True while the phone is ringing to be found (bit 0 of the ninth byte)
+      bool isPhoneRinging() const {
+        return (phoneFlags & FindRinging) != 0;
+      }
+
+      // The weather where the phone is, as the phone last sent it
+      static constexpr uint8_t WeatherNone = 0;
+      static constexpr uint8_t WeatherFresh = 1;
+      // The phone could not get newer numbers than these
+      static constexpr uint8_t WeatherOld = 2;
+      // No numbers at all, and why: the phone app may not see where the phone is, the phone does
+      // not know where it is, or the weather service did not answer
+      static constexpr uint8_t WeatherNoPermission = 0x10;
+      static constexpr uint8_t WeatherNoPlace = 0x11;
+      static constexpr uint8_t WeatherNoAnswer = 0x12;
+      static constexpr uint8_t WeatherHours = 10;
+      static constexpr uint8_t WeatherUnknown = 0xff;
+
+      struct Weather {
+        uint8_t status = WeatherNone;
+        bool fahrenheit = false;
+        bool milesPerHour = false;
+        int16_t temperature = 0;
+        int16_t feelsLike = 0;
+        uint8_t wind = 0;
+        // In percent; WeatherUnknown if the phone did not say
+        uint8_t humidity = WeatherUnknown;
+        uint8_t rainToday = WeatherUnknown;
+        // When these numbers are from, on the phone's clock
+        uint8_t hour = 0;
+        uint8_t minute = 0;
+        // The chance of rain hour by hour, starting with the hour "firstHour" (0-23) that is under way
+        uint8_t firstHour = 0;
+        uint8_t hours = 0;
+        std::array<uint8_t, WeatherHours> rain {};
+        // When the watch received them
+        TickType_t arrived = 0;
+
+        bool hasNumbers() const {
+          return status == WeatherFresh || status == WeatherOld;
+        }
+      };
+
+      // Goes up whenever the phone has said something about the weather
+      uint32_t getWeatherRevision() const {
+        return weatherRevision;
+      }
+
+      // Copies the newest weather. False if it was being replaced at that moment: look again on the next refresh.
+      bool ReadWeather(Weather& out) const {
+        for (int attempt = 0; attempt < 3; attempt++) {
+          const uint32_t before = weatherSequence;
+          if ((before & 1u) != 0) {
+            continue;
+          }
+          out = weather;
+          if (weatherSequence == before) {
+            return true;
+          }
+        }
+        return false;
       }
 
       // True if the song that is playing was picked by Spotify (Smart Shuffle) and is not part of
@@ -190,6 +280,7 @@ namespace Pinetime {
     private:
       static constexpr uint8_t TrackSmart = 0x01;
       static constexpr uint8_t WaitingMark = 0x02;
+      static constexpr uint8_t FindRinging = 0x01;
 
       int OnPhoneMessage(struct os_mbuf* om);
       void Send(const uint8_t* data, uint16_t length);
@@ -223,6 +314,16 @@ namespace Pinetime {
       uint8_t phoneVolumeMax {StateUnknown};
       uint8_t phoneBattery {StateUnknown};
       uint8_t trackFlags {0};
+      uint8_t phoneSoundMode {StateUnknown};
+      uint8_t phoneFlags {0};
+      // Tells when the phone's battery has run low
+      LowBatteryWatch phoneBatteryWatch;
+
+      // The weather as it is shown, and the one that is arriving: the hours come first, then the rest
+      Weather weather {};
+      Weather incomingWeather {};
+      std::atomic<uint32_t> weatherSequence {0};
+      std::atomic<uint32_t> weatherRevision {0};
 
       NimbleController& nimble;
       System::SystemTask& systemTask;

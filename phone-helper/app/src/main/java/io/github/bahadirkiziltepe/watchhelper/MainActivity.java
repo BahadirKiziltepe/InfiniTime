@@ -31,8 +31,9 @@ import java.util.List;
 
 /**
  * The app's one screen. From top to bottom: the watch, anything still to set up, what Spotify is
- * playing, the Spotify login for playlists and queue, the people to call from the watch,
- * notifications and calls, watch software, and help.
+ * playing, the Spotify login for playlists and queue, the people to call from the watch (and
+ * people who called, suggested for it), the weather, notifications and calls with the phone's
+ * sound mode and "find my phone", watch software, and help.
  *
  * <p>Everything is on this one screen, in cards; nothing is hidden behind tabs. What needs no
  * attention stays small: the setup card is only there while something is missing, and the details
@@ -44,6 +45,7 @@ public class MainActivity extends Activity {
   private static final int REQUEST_BLUETOOTH = 1;
   private static final int REQUEST_PHONE = 2;
   private static final int REQUEST_PICK_PERSON = 3;
+  private static final int REQUEST_LOCATION = 4;
   private static final int LOG_LINES_ON_SCREEN = 60;
 
   private Core core;
@@ -78,6 +80,15 @@ public class MainActivity extends Activity {
   private LinearLayout peopleList;
   private String peopleShown;
   private TextView peopleWarning;
+  private LinearLayout suggestBox;
+  private Ui.Status weatherStatus;
+  private TextView locationButton;
+  private TextView alwaysButton;
+  private TextView alwaysNote;
+  private TextView unitsButton;
+  private Ui.Status soundStatus;
+  private Ui.Status findStatus;
+  private TextView ringButton;
 
   private Ui.Status notifyStatus;
   private Ui.Status callStatus;
@@ -132,6 +143,7 @@ public class MainActivity extends Activity {
     super.onResume();
     core.addScreen(onChange);
     core.wake();
+    core.onScreenOpened();
     core.updater.check(false);
     render();
   }
@@ -139,6 +151,7 @@ public class MainActivity extends Activity {
   @Override
   protected void onPause() {
     core.removeScreen(onChange);
+    core.onScreenClosed();
     super.onPause();
   }
 
@@ -146,6 +159,10 @@ public class MainActivity extends Activity {
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     core.wake();
+    if (requestCode == REQUEST_LOCATION) {
+      // Allowed just now: learn where the phone is while this screen is open
+      core.weather.onScreenOpened();
+    }
     render();
   }
 
@@ -240,11 +257,36 @@ public class MainActivity extends Activity {
     LinearLayout people = ui.card();
     root.addView(people);
     people.addView(ui.note("Only the people you add here show up on the watch, one screen to the right of the "
-        + "notifications. Tap a name there, then tap again to call."));
+        + "notifications. Tap a name there, then tap again to call. One screen further is the phone’s call "
+        + "history, which works the same way."));
     peopleWarning = ui.add(people, ui.text("Calling from the watch needs the Phone permission. Tap Allow calls below.",
         14, ui.warn), 10);
     peopleList = ui.add(people, ui.column(), 4);
     ui.add(people, ui.flow(ui.button("Add person", Ui.FILLED, v -> pickPerson())), 16);
+    // People from the contacts who called and are not on the watch yet. Filled in by render().
+    suggestBox = ui.add(people, ui.column(), 16);
+
+    // The weather
+    root.addView(ui.caption("Weather on the watch"));
+    LinearLayout weatherCard = ui.card();
+    root.addView(weatherCard);
+    weatherStatus = ui.new Status();
+    weatherCard.addView(weatherStatus.view);
+    ui.add(weatherCard, ui.note("On the watch it is one screen to the left of the settings screen. The numbers are "
+        + "for where the phone is: the app sends the phone’s position, rounded to about a kilometre, to the weather "
+        + "service and nowhere else. Weather data by Open-Meteo.com."), 10);
+    locationButton = ui.button("Allow location", Ui.FILLED, v -> askForLocation(false));
+    alwaysButton = ui.button("Allow all the time", Ui.FILLED, v -> askForLocation(true));
+    unitsButton = ui.button("", Ui.TONAL, v -> {
+      core.weather.setImperial(!core.weather.imperial());
+      render();
+    });
+    ui.add(weatherCard, ui.flow(locationButton, alwaysButton,
+        ui.button("Refresh", Ui.TONAL, v -> core.weather.refresh()), unitsButton), 14);
+    alwaysNote = ui.add(weatherCard, ui.note("With “Allow all the time” the watch gets the weather for where you "
+        + "are right now. Without it Android only says where the phone is while this screen is open, so the watch "
+        + "gets the weather for where the phone was then. If the button brings nothing up, open the phone’s "
+        + "Settings, Apps, Watch Helper, Permissions, Location."), 12);
 
     // Notifications and calls
     root.addView(ui.caption("Notifications and calls"));
@@ -256,10 +298,18 @@ public class MainActivity extends Activity {
     ui.add(phone, callStatus.view, 16);
     claudeStatus = ui.new Status();
     ui.add(phone, claudeStatus.view, 16);
+    soundStatus = ui.new Status();
+    ui.add(phone, soundStatus.view, 16);
+    findStatus = ui.new Status();
+    ui.add(phone, findStatus.view, 16);
     allowCallsButton = ui.button("Allow calls", Ui.FILLED, v -> askForCalls());
+    ringButton = ui.button("Ring this phone", Ui.TONAL, v -> {
+      core.finder.set(!core.finder.ringing(), "you");
+      render();
+    });
     ui.add(phone, ui.flow(allowCallsButton,
         ui.button("Send a test notification", Ui.TONAL, v -> core.notifications.sendTest()),
-        ui.button("Test the Claude dot", Ui.TONAL, v -> core.testClaude())), 16);
+        ui.button("Test the Claude dot", Ui.TONAL, v -> core.testClaude()), ringButton), 16);
 
     // Watch software
     root.addView(ui.caption("Watch software"));
@@ -359,14 +409,20 @@ public class MainActivity extends Activity {
     boolean background = core.mayRunInBackground();
 
     renderWatch(bluetooth);
-    renderSetup(access, bluetooth, background, core.gadgetbridgeInstalled());
+    // Android gives this along with notification access. Asked for only if it did not.
+    boolean doNotDisturb = !access || core.sound.mayChangeDoNotDisturb();
+    renderSetup(access, bluetooth, background, core.gadgetbridgeInstalled(), doNotDisturb);
     renderSong();
     renderAccount();
     renderPeople();
+    renderWeather();
 
     setTopic(notifyStatus, "Notifications", core.notifications.describe());
     setTopic(callStatus, "Calls", core.calls.describe());
     setTopic(claudeStatus, "Claude", core.describeClaude());
+    setTopic(soundStatus, "Phone sound", core.sound.describe());
+    setTopic(findStatus, "Find my phone", core.finder.describe());
+    ringButton.setText(core.finder.ringing() ? "Stop ringing" : "Ring this phone");
     Ui.show(allowCallsButton, core.calls.missingPermissions().length > 0);
 
     renderUpdater();
@@ -388,8 +444,10 @@ public class MainActivity extends Activity {
   }
 
   /** The setup card lists only what is still missing, and goes away when nothing is. */
-  private void renderSetup(boolean access, boolean bluetooth, boolean background, boolean gadgetbridge) {
-    int missing = (access ? 0 : 1) | (bluetooth ? 0 : 2) | (background ? 0 : 4) | (gadgetbridge ? 8 : 0);
+  private void renderSetup(boolean access, boolean bluetooth, boolean background, boolean gadgetbridge,
+      boolean doNotDisturb) {
+    int missing = (access ? 0 : 1) | (bluetooth ? 0 : 2) | (background ? 0 : 4) | (gadgetbridge ? 8 : 0)
+        | (doNotDisturb ? 0 : 16);
     if (missing == setupShown) {
       return;
     }
@@ -410,6 +468,10 @@ public class MainActivity extends Activity {
     if (!background) {
       addSetup("Keep running", "Android may put this app to sleep, and the watch would stop hearing from the phone.",
           ui.button("Allow", Ui.FILLED, v -> askToRunInBackground()));
+    }
+    if (!doNotDisturb) {
+      addSetup("Do Not Disturb access", "Lets the sound button on the watch put the phone on mute and back. Android "
+          + "ties that to Do Not Disturb.", ui.button("Open settings", Ui.FILLED, v -> openDoNotDisturbSettings()));
     }
     if (gadgetbridge) {
       addSetup("Gadgetbridge is still installed", "Disconnect the watch in Gadgetbridge, or uninstall it. Otherwise "
@@ -492,11 +554,13 @@ public class MainActivity extends Activity {
     loginButton.setText(waiting ? "Open the login again" : "Log in to Spotify");
   }
 
-  /** Rebuilds the list of people, but only when it changed. */
+  /** Rebuilds the list of people and the suggestions under it, but only when they changed. */
   private void renderPeople() {
     Ui.show(peopleWarning, !core.calls.mayPlaceCalls());
     List<ContactStore.Person> all = core.contacts.all();
-    String signature = core.contacts.generation() + ":" + all.size();
+    List<ContactStore.Person> suggested = core.suggestions.all();
+    String signature = core.contacts.generation() + ":" + all.size() + ":" + core.suggestions.generation() + ":"
+        + suggested.size();
     if (signature.equals(peopleShown)) {
       return;
     }
@@ -504,16 +568,11 @@ public class MainActivity extends Activity {
     peopleList.removeAllViews();
     if (all.isEmpty()) {
       ui.add(peopleList, ui.text("Nobody yet.", 15, ui.faint), 12);
-      return;
     }
     for (int i = 0; i < all.size(); i++) {
       final int index = i;
       final ContactStore.Person person = all.get(i);
-      LinearLayout row = ui.row();
-      LinearLayout words = ui.column();
-      words.addView(ui.strong(person.name));
-      words.addView(ui.note(person.number));
-      row.addView(words, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+      LinearLayout row = personRow(person);
       if (i > 0) {
         row.addView(ui.iconButton("↑", "Move " + person.name + " up", v -> {
           core.contacts.moveUp(index);
@@ -523,6 +582,55 @@ public class MainActivity extends Activity {
       row.addView(ui.iconButton("✕", "Remove " + person.name, v -> confirmRemove(index, person.name)), endButton());
       ui.add(peopleList, row, 12);
     }
+
+    // Somebody from the contacts called and is not on the watch: one tap puts them there
+    suggestBox.removeAllViews();
+    Ui.show(suggestBox, !suggested.isEmpty());
+    if (suggested.isEmpty()) {
+      return;
+    }
+    suggestBox.addView(ui.divider());
+    suggestBox.addView(ui.strong("Suggested"));
+    ui.add(suggestBox, ui.note("They called you and are in your contacts, but not on the watch."), 4);
+    for (final ContactStore.Person person : suggested) {
+      LinearLayout row = personRow(person);
+      row.addView(ui.iconButton("+", "Put " + person.name + " on the watch", v -> addSuggested(person)), endButton());
+      row.addView(ui.iconButton("✕", "Dismiss " + person.name, v -> {
+        core.suggestions.dismiss(person.number);
+        render();
+      }), endButton());
+      ui.add(suggestBox, row, 12);
+    }
+  }
+
+  /** A person's name with the number under it, and room at the end for buttons. */
+  private LinearLayout personRow(ContactStore.Person person) {
+    LinearLayout row = ui.row();
+    LinearLayout words = ui.column();
+    words.addView(ui.strong(person.name));
+    words.addView(ui.note(person.number));
+    row.addView(words, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+    return row;
+  }
+
+  private void addSuggested(ContactStore.Person person) {
+    String problem = core.contacts.add(person.name, person.number);
+    if (problem != null) {
+      toast(problem);
+    } else {
+      core.suggestions.dismiss(person.number);
+    }
+    render();
+  }
+
+  private void renderWeather() {
+    setTopic(weatherStatus, "Weather", core.weather.describe());
+    boolean may = core.weather.mayLocate();
+    boolean always = core.weather.mayLocateInBackground();
+    Ui.show(locationButton, !may);
+    Ui.show(alwaysButton, may && !always);
+    Ui.show(alwaysNote, may && !always);
+    unitsButton.setText(core.weather.imperial() ? "Show °C" : "Show °F");
   }
 
   private LinearLayout.LayoutParams endButton() {
@@ -690,6 +798,28 @@ public class MainActivity extends Activity {
         })
         .setNegativeButton("Cancel", null)
         .show();
+  }
+
+  /** Asks for the phone's rough position, or for the same while the app's screen is closed. */
+  private void askForLocation(boolean always) {
+    try {
+      requestPermissions(new String[] {always ? Manifest.permission.ACCESS_BACKGROUND_LOCATION
+          : Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_LOCATION);
+    } catch (RuntimeException e) {
+      toast("Open App info, then Permissions, then Location.");
+      openAppInfo();
+    }
+    if (always) {
+      toast("Pick “Allow all the time”, then come back.");
+    }
+  }
+
+  private void openDoNotDisturbSettings() {
+    try {
+      startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
+    } catch (RuntimeException e) {
+      toast("Open Settings, search for “Do Not Disturb access” and switch on Watch Helper.");
+    }
   }
 
   private void askForCalls() {

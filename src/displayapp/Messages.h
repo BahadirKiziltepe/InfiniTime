@@ -29,6 +29,9 @@ namespace Pinetime {
         // The phone is ringing: bring up the call screen
         IncomingCall,
         WaitingMark,
+        // A battery has run low: buzz twice (at 15 %) or three times (at 5 %)
+        BatteryLow,
+        BatteryCritical,
       };
     }
   }

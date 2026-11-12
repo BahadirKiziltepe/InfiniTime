@@ -165,6 +165,8 @@ final class WatchLink {
   private int levelBattery = UNKNOWN_BYTE;
   private int trackFlags;
   private boolean waitingMark;
+  private int soundMode = UNKNOWN_BYTE;
+  private boolean findRinging;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -896,11 +898,35 @@ final class WatchLink {
     }
   }
 
-  /** The button states, the levels and the marks travel together, in the channel the button states had first. */
+  /**
+   * Tells the watch which sound mode the phone is in: 0 mute, 1 vibrate, 2 sound, 0xff not known
+   * (watch build 16 and newer; older builds ignore it). The watch shows it on the sound button of
+   * its settings screen.
+   */
+  void setSoundMode(int mode) {
+    if (mode != soundMode) {
+      soundMode = mode;
+      putPhoneState();
+    }
+  }
+
+  /** Tells the watch whether the phone is ringing to be found (watch build 16 and newer). */
+  void setFindRinging(boolean ringing) {
+    if (ringing != findRinging) {
+      findRinging = ringing;
+      putPhoneState();
+    }
+  }
+
+  /**
+   * The button states, the levels and the marks travel together, in the channel the button states
+   * had first. Each build of the watch reads as many of these bytes as it knows.
+   */
   private void putPhoneState() {
     int marks = (trackFlags & 0x01) | (waitingMark ? 0x02 : 0);
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
-        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks});
+        (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks, (byte) soundMode,
+        (byte) (findRinging ? 0x01 : 0)});
     pump();
   }
 

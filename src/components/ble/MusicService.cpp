@@ -54,7 +54,9 @@ namespace {
   // followed since phone app build 7 by the phone's media volume, its number of volume steps and
   // the phone's battery in percent, and since build 8 by a byte of flags about the song that is
   // playing (bit 0: Spotify picked it, it is not in the playlist) and other marks for the main
-  // screen (bit 1: Claude has a notification waiting on the phone).
+  // screen (bit 1: Claude has a notification waiting on the phone). Since build 14 two more bytes
+  // follow: the phone's sound mode (0 mute, 1 vibrate, 2 sound) and a byte of flags about the phone
+  // (bit 0: it is ringing to be found).
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
   // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
   // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is
@@ -81,6 +83,12 @@ namespace {
   //        of the colour to draw it in (all three 0: the watch's own orange)
   //   0x2b a piece of it: where it goes (2 bytes), then the bytes, two pixels in each
   //   0x2c the picture is complete: the sum of all its bytes, to be sure
+  // And the weather where the phone is, in answer to the watch asking for it:
+  //   0x2e the chance of rain hour by hour: the first hour (0-23), how many hours, one percentage each
+  //   0x2d the rest, which completes the answer: status, flags (bit 0: Fahrenheit, bit 1: miles per
+  //        hour), temperature (2 bytes, low byte first, may be below zero), what it feels like (2 bytes),
+  //        wind speed, humidity in percent, chance of rain today in percent, and the hour and minute
+  //        the numbers are from. A status that says there are no numbers ends the message there.
   constexpr ble_uuid128_t msPhoneCharUuid {CharUuid(0x0e, 0x00)};
   constexpr uint8_t PhoneNotificationBegin {0x01};
   constexpr uint8_t PhoneNotificationRemove {0x02};
@@ -100,6 +108,9 @@ namespace {
   constexpr uint8_t PhoneIconBegin {0x2a};
   constexpr uint8_t PhoneIconData {0x2b};
   constexpr uint8_t PhoneIconEnd {0x2c};
+  constexpr uint8_t PhoneWeather {0x2d};
+  constexpr uint8_t PhoneWeatherHours {0x2e};
+  constexpr size_t PhoneWeatherSize {12};
   constexpr size_t PhoneListBeginSize {9};
   constexpr size_t PhoneMessageSize {20};
   constexpr size_t PhoneBeginHeaderSize {7};
@@ -363,6 +374,47 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       markIconRevision++;
       break;
     }
+    case PhoneWeatherHours: {
+      if (length < 3) {
+        break;
+      }
+      const size_t count = std::min<size_t>({message[2], length - 3, WeatherHours});
+      incomingWeather.firstHour = static_cast<uint8_t>(message[1] % 24);
+      incomingWeather.hours = static_cast<uint8_t>(count);
+      std::memcpy(incomingWeather.rain.data(), &message[3], count);
+      break;
+    }
+    case PhoneWeather: {
+      if (length < 2) {
+        break;
+      }
+      incomingWeather.status = message[1];
+      if (incomingWeather.hasNumbers() && length >= PhoneWeatherSize) {
+        incomingWeather.fahrenheit = (message[2] & 0x01) != 0;
+        incomingWeather.milesPerHour = (message[2] & 0x02) != 0;
+        incomingWeather.temperature = static_cast<int16_t>(static_cast<uint16_t>(message[3] | (message[4] << 8)));
+        incomingWeather.feelsLike = static_cast<int16_t>(static_cast<uint16_t>(message[5] | (message[6] << 8)));
+        incomingWeather.wind = message[7];
+        incomingWeather.humidity = message[8];
+        incomingWeather.rainToday = message[9];
+        incomingWeather.hour = message[10];
+        incomingWeather.minute = message[11];
+      } else {
+        // No numbers: nothing of an earlier answer may be shown as if it belonged to this one.
+        // (Numbers announced but cut short count as none.)
+        const uint8_t status = incomingWeather.hasNumbers() ? WeatherNoAnswer : incomingWeather.status;
+        incomingWeather = {};
+        incomingWeather.status = status;
+      }
+      incomingWeather.arrived = xTaskGetTickCount();
+      // An odd number tells a reader that the weather is being replaced right now
+      weatherSequence++;
+      weather = incomingWeather;
+      weatherSequence++;
+      weatherRevision++;
+      incomingWeather = {};
+      break;
+    }
     default:
       break;
   }
@@ -421,8 +473,17 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
         phoneVolume = static_cast<uint8_t>(s[3]);
         phoneVolumeMax = static_cast<uint8_t>(s[4]);
         phoneBattery = static_cast<uint8_t>(s[5]);
+        // The phone's battery has just run down to 15 % or to 5 %: the wearer is told with a buzz
+        const auto warning = phoneBatteryWatch.Update(phoneBattery, false);
+        if (warning == LowBatteryWatch::Warnings::Critical) {
+          systemTask.PushMessage(Pinetime::System::Messages::OnBatteryCritical);
+        } else if (warning == LowBatteryWatch::Warnings::Low) {
+          systemTask.PushMessage(Pinetime::System::Messages::OnBatteryLow);
+        }
       }
       trackFlags = notifSize >= 7 ? static_cast<uint8_t>(s[6]) : 0;
+      phoneSoundMode = notifSize >= 8 ? static_cast<uint8_t>(s[7]) : StateUnknown;
+      phoneFlags = notifSize >= 9 ? static_cast<uint8_t>(s[8]) : 0;
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msPositionCharUuid.u) == 0) {
       trackProgress = (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3];
       trackProgressUpdateTime = xTaskGetTickCount();
@@ -477,6 +538,8 @@ void Pinetime::Controllers::MusicService::OnDisconnect() {
   phoneVolumeMax = StateUnknown;
   phoneBattery = StateUnknown;
   trackFlags = 0;
+  phoneSoundMode = StateUnknown;
+  phoneFlags = 0;
   lists.Reset();
   notificationManager.SetCall(Pinetime::Controllers::NotificationManager::CallStates::Idle, nullptr, 0);
 }
@@ -533,5 +596,20 @@ void Pinetime::Controllers::MusicService::ActOnRow(PhoneLists::Kinds kind,
 
 void Pinetime::Controllers::MusicService::DismissNotification(uint16_t phoneId) {
   const uint8_t message[] = {EVENT_NOTIFICATION_DISMISS, static_cast<uint8_t>(phoneId & 0xff), static_cast<uint8_t>(phoneId >> 8)};
+  Send(message, sizeof(message));
+}
+
+void Pinetime::Controllers::MusicService::RequestWeather() {
+  const uint8_t message[] = {EVENT_WEATHER, 0};
+  Send(message, sizeof(message));
+}
+
+void Pinetime::Controllers::MusicService::SetPhoneSoundMode(uint8_t mode) {
+  const uint8_t message[] = {EVENT_SOUND_MODE, mode};
+  Send(message, sizeof(message));
+}
+
+void Pinetime::Controllers::MusicService::FindPhone(bool ring) {
+  const uint8_t message[] = {EVENT_FIND_PHONE, static_cast<uint8_t>(ring ? 1 : 0)};
   Send(message, sizeof(message));
 }

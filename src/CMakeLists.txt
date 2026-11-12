@@ -386,6 +386,7 @@ list(APPEND SOURCE_FILES
         displayapp/screens/Notifications.cpp
         displayapp/screens/Call.cpp
         displayapp/screens/PhoneList.cpp
+        displayapp/screens/PhoneWeather.cpp
         displayapp/screens/Twos.cpp
         displayapp/screens/HeartRate.cpp
         displayapp/screens/FlashLight.cpp
@@ -412,6 +413,7 @@ list(APPEND SOURCE_FILES
         displayapp/screens/settings/SettingWatchFace.cpp
         displayapp/screens/settings/SettingTimeFormat.cpp
         displayapp/screens/settings/SettingWeatherFormat.cpp
+        displayapp/screens/settings/SettingNotifications.cpp
         displayapp/screens/settings/SettingWakeUp.cpp
         displayapp/screens/settings/SettingDisplay.cpp
         displayapp/screens/settings/SettingHeartRate.cpp
@@ -618,6 +620,7 @@ set(INCLUDE_FILES
         displayapp/screens/Notifications.h
         displayapp/screens/Call.h
         displayapp/screens/PhoneList.h
+        displayapp/screens/PhoneWeather.h
         displayapp/widgets/TapPad.h
         displayapp/screens/HeartRate.h
         displayapp/screens/Metronome.h
@@ -642,6 +645,7 @@ set(INCLUDE_FILES
         drivers/Bma421_C/bma4.c
         drivers/Bma421_C/bma423.c
         components/battery/BatteryController.h
+        components/battery/LowBatteryWatch.h
         components/ble/BleController.h
         components/ble/NotificationManager.h
         components/datetime/DateTimeController.h

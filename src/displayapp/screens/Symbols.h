@@ -73,6 +73,9 @@ namespace Pinetime {
 
         static constexpr const char* notificationsOff = "\xEE\x9F\xB6";
         static constexpr const char* notificationsOn = "\xEE\x9F\xB7";
+        // A phone that vibrates, and a phone that rings (to be found)
+        static constexpr const char* vibration = "\xEE\x98\xAD";
+        static constexpr const char* phoneRing = "\xEE\x83\x9D";
 
         static constexpr const char* flashlight = "\xEF\x80\x8B";
         static constexpr const char* paintbrushLg = "\xEE\x90\x8A";

@@ -19,13 +19,15 @@ namespace {
   constexpr lv_coord_t titleWidth = 170;
   constexpr lv_coord_t rowHeight = 52;
   constexpr lv_coord_t rowGap = 2;
-  constexpr lv_coord_t rowPadding = 8;
+  // Leaves room for 19 characters on a line
+  constexpr lv_coord_t rowPadding = 6;
   constexpr lv_coord_t rowWidth = 240;
   constexpr lv_coord_t rowTextWidth = rowWidth - 2 * rowPadding;
   constexpr lv_coord_t noteWidth = 224;
 
   constexpr lv_color_t musicColor = LV_COLOR_MAKE(0x1e, 0xd7, 0x60);
   constexpr lv_color_t contactsColor = LV_COLOR_MAKE(0x4a, 0x90, 0xff);
+  constexpr lv_color_t missedColor = LV_COLOR_MAKE(0xff, 0x60, 0x60);
   constexpr lv_color_t rowColor = Colors::bgAlt;
   constexpr lv_color_t rowLitColor = LV_COLOR_MAKE(0x60, 0x60, 0x60);
 
@@ -77,9 +79,17 @@ namespace {
         return "Contacts";
       case Kinds::History:
         return "History";
+      case Kinds::Calls:
+        return "Calls";
       default:
         return "";
     }
+  }
+
+  // The two lists whose rows are people to call
+  bool IsPeople(Pinetime::Controllers::PhoneLists::Kinds kind) {
+    using Kinds = Pinetime::Controllers::PhoneLists::Kinds;
+    return kind == Kinds::Contacts || kind == Kinds::Calls;
   }
 }
 
@@ -290,7 +300,7 @@ void PhoneList::TakeNews(TickType_t now) {
       ShowToast("List changed", Colors::orange, now);
       Ask(wantedOffset);
     } else if (result.code == Lists::ResultDone) {
-      ShowToast(result.text.data(), kind == Kinds::Contacts ? contactsColor : musicColor, now);
+      ShowToast(result.text.data(), IsPeople(kind) ? contactsColor : musicColor, now);
     } else {
       StopConfirming();
       ShowToast(result.text[0] != '\0' ? result.text.data() : "Did not work", Colors::orange, now);
@@ -350,11 +360,17 @@ void PhoneList::OnTap(Widgets::TapPad::Events tap, TickType_t now) {
       }
       break;
     case Kinds::Contacts:
+    case Kinds::Calls:
       if (isTap) {
         confirming = true;
         calling = false;
         confirmIndex = index;
         confirmName = page.rows[row].text;
+        // A row of the call history has a second line (made, received or missed, and when).
+        // The question only names who it was.
+        if (char* secondLine = std::strchr(confirmName.data(), '\n'); secondLine != nullptr) {
+          *secondLine = '\0';
+        }
         confirmTick = now;
         needsDraw = true;
       }
@@ -386,7 +402,7 @@ void PhoneList::LightRow(int row) {
 }
 
 void PhoneList::DrawTitle() {
-  const lv_color_t kindColor = kind == Kinds::Contacts ? contactsColor : musicColor;
+  const lv_color_t kindColor = IsPeople(kind) ? contactsColor : musicColor;
   if (toastVisible) {
     lv_label_set_text(labelTitle, toast.data());
     lv_obj_set_style_local_text_color(labelTitle, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, toastColor);
@@ -435,6 +451,8 @@ void PhoneList::Draw() {
       used = AddText(text, sizeof(text), used, playingPrefix);
     } else if ((row.flags & Lists::RowClosed) != 0) {
       color = Colors::lightGray;
+    } else if ((row.flags & Lists::RowMissed) != 0) {
+      color = missedColor;
     }
     AddText(text, sizeof(text), used, row.text.data());
 
@@ -507,6 +525,9 @@ bool PhoneList::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
       if (kind == Kinds::Queue) {
         // The playlists are to the right of the queue
         app->StartApp(Apps::Playlists, DisplayApp::FullRefreshDirections::LeftAnim);
+      } else if (kind == Kinds::Contacts) {
+        // The call history is to the right of the contacts
+        app->StartApp(Apps::Calls, DisplayApp::FullRefreshDirections::LeftAnim);
       }
       // From the history this is the way back to the queue, which is not this screen's business
       return kind != Kinds::History;
@@ -516,7 +537,8 @@ bool PhoneList::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
         app->StartApp(Apps::History, DisplayApp::FullRefreshDirections::RightAnim);
         return true;
       }
-      // For the playlists, the songs and the contacts this is the way back. Left of the history is nothing.
+      // For the playlists, the songs, the contacts and the call history this is the way back.
+      // Left of the history of played songs is nothing.
       return kind == Kinds::History;
     default:
       return false;

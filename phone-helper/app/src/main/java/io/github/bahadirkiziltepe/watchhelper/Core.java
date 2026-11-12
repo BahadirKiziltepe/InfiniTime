@@ -47,6 +47,10 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   static final int REQUEST_FIRST = 0x30;
   static final int REQUEST_LAST = 0x3f;
   static final int REQUEST_DISMISS = 0x32;
+  // Watch build 16 and newer: the weather, the phone's sound mode, and ringing to be found.
+  static final int REQUEST_WEATHER = 0x33;
+  static final int REQUEST_SOUND_MODE = 0x34;
+  static final int REQUEST_FIND_PHONE = 0x35;
 
   /** Android announces every volume change under this name. It is not in the public list of names. */
   private static final String VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION";
@@ -82,6 +86,18 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   final SpotifyAccount account;
   final MusicLibrary library;
   final WatchLists lists;
+  final CallHistory history;
+  final SuggestionStore suggestions;
+  final SoundMode sound;
+  final PhoneFinder finder;
+  final Weather weather;
+  /** For reading the call log when the screen opens, away from the main thread. */
+  private final java.util.concurrent.ExecutorService background =
+      java.util.concurrent.Executors.newSingleThreadExecutor(work -> {
+        Thread thread = new Thread(work, "core-background");
+        thread.setDaemon(true);
+        return thread;
+      });
   /**
    * Keeps the phone awake for the few seconds it takes to answer the watch. Without it a phone
    * that is lying idle can doze off in the middle of asking Spotify, and the watch waits in vain.
@@ -120,7 +136,12 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     this.contacts = new ContactStore(app);
     this.account = new SpotifyAccount(app, main, log, this::onAccountChanged);
     this.library = new MusicLibrary(account, log, () -> main.post(spotify::wakeUp));
-    this.lists = new WatchLists(main, log, watch, account, library, contacts, calls, spotify);
+    this.history = new CallHistory(app, calls);
+    this.suggestions = new SuggestionStore(app);
+    this.sound = new SoundMode(app, main, log, watch, this::changed);
+    this.finder = new PhoneFinder(app, main, log, watch, sound, this::changed);
+    this.weather = new Weather(app, main, log, watch, this::changed);
+    this.lists = new WatchLists(main, log, watch, account, library, contacts, calls, spotify, history);
     PowerManager.WakeLock lock = null;
     try {
       PowerManager power = app.getSystemService(PowerManager.class);
@@ -201,9 +222,34 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
 
   /** Starts whatever can be started. Called when the screen opens and when Android wakes the app. */
   void wake() {
+    // Android 17 only lets an app change a volume or the sound mode, or make a sound, in the
+    // background while it runs a foreground service. See LinkService.
+    LinkService.ensure(app);
     spotify.start();
     watch.start();
     calls.start();
+    sound.start();
+  }
+
+  /** The app's screen came up. */
+  void onScreenOpened() {
+    // Whoever looks at the screen has found the phone
+    finder.stop("the app was opened");
+    weather.onScreenOpened();
+    // People from the contacts who called and are not on the watch yet are suggested for it
+    final long since = suggestions.seen();
+    background.execute(() -> {
+      final List<CallHistory.Entry> came = history.incomingSince(since);
+      main.post(() -> {
+        if (came != null && suggestions.consider(came, contacts)) {
+          changed();
+        }
+      });
+    });
+  }
+
+  void onScreenClosed() {
+    weather.onScreenClosed();
   }
 
   void onListenerConnected() {
@@ -501,10 +547,21 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         // The request is answered all the same if the phone stays awake by itself.
       }
     }
+    LinkService.ensure(app);
     int code = message[0] & 0xff;
     if (code == REQUEST_DISMISS) {
       if (message.length >= 3) {
         notifications.dismiss((message[1] & 0xff) | ((message[2] & 0xff) << 8));
+      }
+    } else if (code == REQUEST_WEATHER) {
+      weather.onWatchAsks();
+    } else if (code == REQUEST_SOUND_MODE) {
+      if (message.length >= 2) {
+        sound.set(message[1] & 0xff, FROM_WATCH);
+      }
+    } else if (code == REQUEST_FIND_PHONE) {
+      if (message.length >= 2) {
+        finder.set((message[1] & 0xff) != 0, FROM_WATCH);
       }
     } else {
       lists.onRequest(message);
@@ -569,6 +626,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
    * and the phone's own keys count alike.
    */
   private void volume(boolean up) {
+    LinkService.ensure(app);
     try {
       AudioManager audio = app.getSystemService(AudioManager.class);
       if (audio != null) {
@@ -622,6 +680,12 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         return "a tap or hold on a list row";
       case REQUEST_DISMISS:
         return "clear a notification";
+      case REQUEST_WEATHER:
+        return "the weather";
+      case REQUEST_SOUND_MODE:
+        return "change the phone's sound mode";
+      case REQUEST_FIND_PHONE:
+        return "find my phone";
       default:
         return String.format(Locale.ROOT, "code 0x%02x", code);
     }

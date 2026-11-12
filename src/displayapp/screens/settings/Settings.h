@@ -48,7 +48,7 @@ namespace Pinetime {
           {Symbols::shoe, "Steps", Apps::SettingSteps},
           {Symbols::heartBeat, "Heartrate", Apps::SettingHeartRate},
 
-          {Symbols::cloudSunRain, "Weather", Apps::SettingWeatherFormat},
+          {Symbols::bell, "Notifications", Apps::SettingNotifications},
           {Symbols::home, "Watch face", Apps::SettingWatchFace},
           {Symbols::list, "About", Apps::SysInfo},
         }};

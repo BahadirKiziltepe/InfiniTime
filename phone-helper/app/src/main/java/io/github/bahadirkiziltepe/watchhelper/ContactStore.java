@@ -78,6 +78,20 @@ final class ContactStore {
     return null;
   }
 
+  /** True if this number is on the list, however it is spelled. */
+  boolean has(String number) {
+    String wanted = digits(number == null ? "" : number);
+    if (wanted.isEmpty()) {
+      return false;
+    }
+    for (Person p : people) {
+      if (digits(p.number).equals(wanted)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void remove(int index) {
     if (index >= 0 && index < people.size()) {
       people.remove(index);
@@ -106,7 +120,7 @@ final class ContactStore {
     prefs.edit().putString(KEY, out.toString()).apply();
   }
 
-  private static String digits(String number) {
+  static String digits(String number) {
     StringBuilder sb = new StringBuilder();
     for (int i = 0; i < number.length(); i++) {
       char c = number.charAt(i);

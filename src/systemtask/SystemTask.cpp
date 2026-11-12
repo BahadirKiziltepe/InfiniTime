@@ -377,8 +377,19 @@ void SystemTask::Work() {
         case Messages::MeasureBatteryTimerExpired:
           batteryController.MeasureVoltage();
           break;
-        case Messages::BatteryPercentageUpdated:
+        case Messages::BatteryPercentageUpdated: {
           nimbleController.NotifyBatteryLevel(batteryController.PercentRemaining());
+          // The watch's own battery has just run down to 15 % or to 5 %
+          const auto warning = lowBattery.Update(batteryController.PercentRemaining(), batteryController.IsPowerPresent());
+          if (warning != Pinetime::Controllers::LowBatteryWatch::Warnings::None) {
+            WarnLowBattery(warning == Pinetime::Controllers::LowBatteryWatch::Warnings::Critical);
+          }
+          break;
+        }
+        case Messages::OnBatteryLow:
+        case Messages::OnBatteryCritical:
+          // The same for the phone's battery, which the phone link keeps an eye on
+          WarnLowBattery(msg == Messages::OnBatteryCritical);
           break;
         case Messages::OnPairing:
           GoToRunning();
@@ -566,6 +577,19 @@ void SystemTask::HandleButtonAction(Controllers::ButtonActions action) {
   }
 
   fastWakeUpDone = false;
+}
+
+// The watch's battery or the phone's has run down to 15 % or to 5 %. The watch buzzes for it, in
+// short separate buzzes that do not feel like a notification, and the screen comes on: the number
+// of the battery in question is yellow from 15 % down and red from 5 % down. Quiet when alerts are
+// switched off, like everything else.
+void SystemTask::WarnLowBattery(bool critical) {
+  if (settingsController.GetNotificationStatus() != Pinetime::Controllers::Settings::Notification::On) {
+    return;
+  }
+  GoToRunning();
+  displayApp.PushMessage(critical ? Pinetime::Applications::Display::Messages::BatteryCritical
+                                  : Pinetime::Applications::Display::Messages::BatteryLow);
 }
 
 void SystemTask::PushMessage(System::Messages msg) {

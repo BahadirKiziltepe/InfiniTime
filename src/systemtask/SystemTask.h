@@ -17,6 +17,7 @@
 #include "components/ble/NotificationManager.h"
 #include "components/stopwatch/StopWatchController.h"
 #include "components/alarm/AlarmController.h"
+#include "components/battery/LowBatteryWatch.h"
 #include "components/fs/FS.h"
 #include "touchhandler/TouchHandler.h"
 #include "buttonhandler/ButtonHandler.h"
@@ -142,6 +143,10 @@ namespace Pinetime {
       void GoToRunning();
       void GoToSleep();
       void UpdateMotion();
+      void WarnLowBattery(bool critical);
+
+      // Tells when the watch's own battery has run low
+      Pinetime::Controllers::LowBatteryWatch lowBattery;
 
       // Movements that turn the screen off as well as on (see UpdateMotion). Motion is read every 100 ms.
       static constexpr uint8_t motionSettleUpdates = 7;
