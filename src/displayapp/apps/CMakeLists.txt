@@ -1,9 +1,9 @@
 if(DEFINED ENABLE_USERAPPS)
     set(USERAPP_TYPES ${ENABLE_USERAPPS} CACHE STRING "List of user apps to build into the firmware")
 else ()
-    # This firmware has no app launcher. Steps is opened from the quick settings page.
-    # Alarm and Timer are not reachable from the UI, but DisplayApp loads their screens
-    # when an alarm or timer fires, so they have to stay in the list.
+    # This firmware has no app launcher, so none of these can be opened from the UI. The quick
+    # settings page shows today's step count itself. DisplayApp loads the Alarm and Timer screens
+    # when an alarm or timer fires, so they have to stay in the list; Steps is kept with them.
     # The other stock apps (StopWatch, HeartRate, Music, Paint, Paddle, Twos, Dice, Metronome,
     # Navigation, Calculator, Weather) stay in the source tree but are left out of the build.
     set(DEFAULT_USER_APP_TYPES "Apps::Steps")

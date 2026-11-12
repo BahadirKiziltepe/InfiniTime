@@ -142,6 +142,17 @@ namespace Pinetime {
       void GoToRunning();
       void GoToSleep();
       void UpdateMotion();
+
+      // Movements that turn the screen off as well as on (see UpdateMotion). Motion is read every 100 ms.
+      static constexpr uint8_t motionSettleUpdates = 7;
+      static constexpr uint8_t raiseHoldoffUpdates = 10;
+      // Updates in a row with the shake speed at or under the wake setting
+      uint8_t calmUpdates = 0;
+      // Updates in a row without a shake, counted since the watch woke up or was last touched
+      uint8_t steadyUpdates = 0;
+      // Updates left during which raising the wrist does not wake the watch
+      uint8_t raiseWakeHoldoff = 0;
+      bool shakeWakeBlocked = false;
       static constexpr TickType_t batteryMeasurementPeriod = pdMS_TO_TICKS(10 * 60 * 1000);
 
       SystemMonitor monitor;

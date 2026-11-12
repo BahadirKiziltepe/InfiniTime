@@ -35,6 +35,42 @@ namespace {
   }
 }
 
+bool MotionController::IsShaking() const {
+  // The history holds the last 0.7 s, one reading every 100 ms. A deliberate shake swings the
+  // readings back and forth within that time. Raising or lowering the arm moves them one way only,
+  // and walking does not move them far enough from one reading to the next.
+  // Steps along z (through the screen) have to be bigger: that is the axis walking bounces along
+  // while the watch is being looked at.
+  constexpr int32_t minStepXY = 300; // about 0.3 g between two readings
+  constexpr int32_t minStepZ = 600;
+  constexpr uint8_t minReversals = 2;
+
+  auto reversals = [](const Utility::CircularBuffer<int16_t, histSize>& history, int32_t minStep) {
+    uint8_t count = 0;
+    int8_t lastDirection = 0;
+    for (uint8_t i = 0; i + 1 < histSize; i++) {
+      const int32_t step = history[i] - history[i + 1];
+      int8_t direction = 0;
+      if (step >= minStep) {
+        direction = 1;
+      } else if (step <= -minStep) {
+        direction = -1;
+      }
+      if (direction == 0) {
+        continue;
+      }
+      if (lastDirection != 0 && direction != lastDirection) {
+        count++;
+      }
+      lastDirection = direction;
+    }
+    return count;
+  };
+
+  return reversals(xHistory, minStepXY) >= minReversals || reversals(yHistory, minStepXY) >= minReversals ||
+         reversals(zHistory, minStepZ) >= minReversals;
+}
+
 void MotionController::AdvanceDay() {
   --nbSteps; // Higher index = further in the past
   SetSteps(Days::Today, 0);

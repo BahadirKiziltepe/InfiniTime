@@ -7,8 +7,8 @@
 #include <string>
 #include "displayapp/Controllers.h"
 #include "displayapp/apps/Apps.h"
+#include "displayapp/screens/BatteryIcon.h"
 #include "displayapp/screens/Screen.h"
-#include "displayapp/widgets/StatusIcons.h"
 #include "components/datetime/DateTimeController.h"
 #include "utility/DirtyValue.h"
 
@@ -17,7 +17,6 @@ namespace Pinetime {
     class Settings;
     class Battery;
     class Ble;
-    class AlarmController;
     class NotificationManager;
     class MotorController;
     class MusicService;
@@ -29,20 +28,21 @@ namespace Pinetime {
       /**
        * Main screen: a music remote with the clock in the top left corner.
        *
-       * - Top bar: time on the left, bluetooth and battery on the right.
+       * - Top bar: time on the left, battery level as a number on the right.
        * - Below it: track, artist and a progress bar.
-       * - First row of buttons: previous / play-pause / next.
-       * - Second row: shuffle / repeat / add. These need a phone-side helper that does not exist yet,
-       *   so for now they are drawn dimmed and do not react.
+       * - No playback buttons. The screen itself is the button:
+       *   tap = play or pause, double tap = next track, tap and hold = previous track.
+       * - Bottom row: shuffle on the left, repeat on the right, and between them a plus that is only
+       *   there while the current song is not saved yet. These three are acted on by the Watch Helper
+       *   phone app, which also reports what each one currently shows.
        * - Swiping left or right lowers or raises the phone's media volume.
-       * - Swiping up or down is left to DisplayApp (quick settings / notifications).
+       * - Swiping down or up is left to DisplayApp (quick settings / notifications).
        */
       class WatchFaceRemote : public Screen {
       public:
         WatchFaceRemote(Controllers::DateTime& dateTimeController,
                         const Controllers::Battery& batteryController,
                         const Controllers::Ble& bleController,
-                        const Controllers::AlarmController& alarmController,
                         Controllers::NotificationManager& notificationManager,
                         Controllers::Settings& settingsController,
                         Controllers::MotorController& motorController,
@@ -53,39 +53,49 @@ namespace Pinetime {
         bool OnTouchEvent(TouchEvents event) override;
 
         void OnButtonEvent(lv_obj_t* obj, lv_event_t event);
+        void OnTapAreaEvent(lv_event_t event);
 
       private:
         void ChangeVolume(bool up);
+        void UpdateBattery();
         void UpdateMusic(TickType_t now);
-        void UpdateExtraButtons();
+        void UpdateExtraButtons(TickType_t now);
+        void UpdateTaps(TickType_t now);
+        void NoteScreenOn(TickType_t now);
+        bool JustWoke(TickType_t now);
+        void TogglePlay(TickType_t now);
+        void Skip(bool forward, TickType_t now);
         void SendExtra(char event);
-        void SetPlaying(bool isPlaying);
+        void ShowPlayerIcon();
 
         Utility::DirtyValue<std::chrono::time_point<std::chrono::system_clock, std::chrono::minutes>> currentDateTime {};
         Utility::DirtyValue<bool> notificationState {};
+        Utility::DirtyValue<uint8_t> batteryPercent {};
+        Utility::DirtyValue<bool> powerPresent {};
 
         lv_obj_t* labelTime;
         lv_obj_t* labelAmPm;
+        lv_obj_t* labelBattery;
+        lv_obj_t* labelPlug;
         lv_obj_t* notificationIcon;
         lv_obj_t* labelVolume;
         lv_obj_t* labelTrack;
         lv_obj_t* labelArtist;
+        lv_obj_t* labelPlayer;
         lv_obj_t* barProgress;
-        lv_obj_t* btnPrev;
-        lv_obj_t* btnPlayPause;
-        lv_obj_t* btnNext;
-        lv_obj_t* labelPlayPause;
+        lv_obj_t* tapArea;
         lv_obj_t* btnShuffle;
-        lv_obj_t* btnRepeat;
         lv_obj_t* btnAdd;
+        lv_obj_t* btnRepeat;
         lv_obj_t* labelShuffle;
-        lv_obj_t* labelRepeat;
         lv_obj_t* labelAdd;
+        lv_obj_t* labelRepeat;
 
-        lv_style_t btnStyle;
         lv_style_t extraBtnStyle;
+        BatteryIcon batteryIcon;
 
         Controllers::DateTime& dateTimeController;
+        const Controllers::Battery& batteryController;
         const Controllers::Ble& bleController;
         Controllers::NotificationManager& notificationManager;
         Controllers::Settings& settingsController;
@@ -94,6 +104,8 @@ namespace Pinetime {
 
         std::string track;
         std::string artist;
+        bool trackDrawn = false;
+        bool shownConnected = false;
         bool playing = false;
         bool progressVisible = false;
 
@@ -101,20 +113,46 @@ namespace Pinetime {
         bool musicPolled = false;
         TickType_t lastMusicPoll = 0;
 
-        /** After a tap on play/pause, show the new state right away and give the phone a moment to confirm it */
+        /** After a tap, show the new play state right away and give the phone a moment to confirm it */
         bool playOverride = false;
         TickType_t playOverrideTick = 0;
+
+        /** After a skip, the player icon shows which way it went for a moment */
+        bool skipHintVisible = false;
+        bool skipHintForward = false;
+        TickType_t skipHintTick = 0;
 
         bool volumeHintVisible = false;
         TickType_t volumeHintTick = 0;
 
-        /** What the second row currently shows. Starts at a value no state uses, so the first update draws it. */
+        /** Touch pad: a finger is down on it, and whether this press can still become a tap or a hold */
+        bool fingerDown = false;
+        bool pressSpent = false;
+        TickType_t pressTick = 0;
+        lv_point_t pressPoint = {0, 0};
+        /** One tap has been seen and is waiting to find out whether a second one follows */
+        bool tapWaiting = false;
+        TickType_t tapTick = 0;
+        /** A press that slid off one of the bottom buttons onto the pad is not a tap */
+        bool slidOffButton = false;
+        TickType_t slidOffTick = 0;
+
+        /** Nothing here runs while the display is off, so a long gap between two calls means the watch just woke up */
+        TickType_t lastActiveTick = 0;
+        bool woke = false;
+        TickType_t wokeTick = 0;
+
+        /** What the bottom row currently shows. Starts at a value no state uses, so the first update draws it. */
         uint8_t shownShuffle = 0xfe;
         uint8_t shownRepeat = 0xfe;
-        uint8_t shownSaved = 0xfe;
+        bool shownAdd = false;
+        /** The plus was tapped: it stays away while the phone catches up, and the pad under it ignores a second tap */
+        bool addOverride = false;
+        TickType_t addOverrideTick = 0;
+        bool padMuted = false;
+        TickType_t padMuteTick = 0;
 
         lv_task_t* taskRefresh;
-        Widgets::StatusIcons statusIcons;
       };
     }
 
@@ -127,7 +165,6 @@ namespace Pinetime {
         return new Screens::WatchFaceRemote(controllers.dateTimeController,
                                             controllers.batteryController,
                                             controllers.bleController,
-                                            controllers.alarmController,
                                             controllers.notificationManager,
                                             controllers.settingsController,
                                             controllers.motorController,

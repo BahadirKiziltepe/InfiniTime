@@ -56,6 +56,9 @@ namespace Pinetime {
       bool ShouldRaiseWake() const;
       bool ShouldLowerSleep() const;
 
+      // True while the watch is shaken back and forth, as opposed to being moved or turned once
+      bool IsShaking() const;
+
       int32_t CurrentShakeSpeed() const {
         return accumulatedSpeed;
       }

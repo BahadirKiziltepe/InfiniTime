@@ -347,6 +347,13 @@ void DisplayApp::Refresh() {
       case Messages::NotifyDeviceActivity:
         lv_disp_trig_activity(nullptr);
         break;
+      case Messages::ShakeToSleep:
+        // Shaking the watch again turns the screen off, but only on the main screen. A notification
+        // or a settings page should not vanish because the arm moved.
+        if (state == States::Running && currentApp == Apps::Clock) {
+          PushMessageToSystemTask(System::Messages::GoToSleep);
+        }
+        break;
       case Messages::GoToRunning:
         // If SystemTask is sleeping, the GoToRunning message is old
         // and must be ignored. Otherwise DisplayApp will use SPI
@@ -367,7 +374,8 @@ void DisplayApp::Refresh() {
         // Only used for recovery firmware
         break;
       case Messages::NewNotification:
-        LoadNewScreen(Apps::NotificationsPreview, DisplayApp::FullRefreshDirections::Down);
+        // Comes up from the bottom, where the notifications live
+        LoadNewScreen(Apps::NotificationsPreview, DisplayApp::FullRefreshDirections::Up);
         break;
       case Messages::TimerDone: {
         if (state != States::Running) {
@@ -422,13 +430,14 @@ void DisplayApp::Refresh() {
           if (currentApp == Apps::Clock) {
             // The main screen is a music remote. It handles left/right swipes itself (volume),
             // there is no app launcher, and a double tap does not put the watch to sleep
-            // because the playback buttons can be tapped quickly in a row.
+            // because on that screen it means "next track".
+            // The quick settings sit above the main screen and the notifications below it.
             switch (gesture) {
-              case TouchEvents::SwipeUp:
-                LoadNewScreen(Apps::QuickSettings, DisplayApp::FullRefreshDirections::Up);
-                break;
               case TouchEvents::SwipeDown:
-                LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
+                LoadNewScreen(Apps::QuickSettings, DisplayApp::FullRefreshDirections::Down);
+                break;
+              case TouchEvents::SwipeUp:
+                LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Up);
                 break;
               default:
                 break;
@@ -451,10 +460,11 @@ void DisplayApp::Refresh() {
         break;
       case Messages::ButtonLongPressed:
         if (currentApp != Apps::Clock) {
-          if (currentApp == Apps::Notifications) {
-            LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Up);
-          } else {
+          // Notifications are below the main screen, everything else is above it
+          if (currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview) {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Down);
+          } else {
+            LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Up);
           }
           appStackDirections.Reset();
           returnAppStack.Reset();
@@ -466,7 +476,7 @@ void DisplayApp::Refresh() {
         break;
       case Messages::ButtonDoubleClicked:
         if (currentApp != Apps::Notifications && currentApp != Apps::NotificationsPreview) {
-          LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
+          LoadNewScreen(Apps::Notifications, DisplayApp::FullRefreshDirections::Up);
         }
         break;
 

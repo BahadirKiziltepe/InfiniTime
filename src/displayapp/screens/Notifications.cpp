@@ -95,10 +95,11 @@ void Notifications::Refresh() {
     }
 
     currentItem.reset(nullptr);
+    // Older notifications are further down, newer ones are back up towards the main screen
     if (afterDismissNextMessageFromAbove) {
-      app->SetFullRefresh(DisplayApp::FullRefreshDirections::Down);
-    } else {
       app->SetFullRefresh(DisplayApp::FullRefreshDirections::Up);
+    } else {
+      app->SetFullRefresh(DisplayApp::FullRefreshDirections::Down);
     }
 
     if (validDisplay) {
@@ -179,7 +180,9 @@ bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
         return true;
       }
       return false;
-    case Pinetime::Applications::TouchEvents::SwipeDown: {
+    // This screen is reached by swiping up from the main screen. Swiping up again goes to older
+    // notifications, swiping down comes back to newer ones and finally to the main screen.
+    case Pinetime::Applications::TouchEvents::SwipeUp: {
       Controllers::NotificationManager::Notification previousNotification;
       if (validDisplay) {
         previousNotification = notificationManager.GetPrevious(currentId);
@@ -195,7 +198,7 @@ bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
       Controllers::NotificationManager::Notification::Idx currentIdx = notificationManager.IndexOf(currentId);
       validDisplay = true;
       currentItem.reset(nullptr);
-      app->SetFullRefresh(DisplayApp::FullRefreshDirections::Down);
+      app->SetFullRefresh(DisplayApp::FullRefreshDirections::Up);
       currentItem = std::make_unique<NotificationItem>(previousNotification.Title(),
                                                        previousNotification.Message(),
                                                        currentIdx + 1,
@@ -205,7 +208,7 @@ bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
                                                        motorController);
     }
       return true;
-    case Pinetime::Applications::TouchEvents::SwipeUp: {
+    case Pinetime::Applications::TouchEvents::SwipeDown: {
       Controllers::NotificationManager::Notification nextNotification;
       if (validDisplay) {
         nextNotification = notificationManager.GetNext(currentId);
@@ -222,7 +225,7 @@ bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
       Controllers::NotificationManager::Notification::Idx currentIdx = notificationManager.IndexOf(currentId);
       validDisplay = true;
       currentItem.reset(nullptr);
-      app->SetFullRefresh(DisplayApp::FullRefreshDirections::Up);
+      app->SetFullRefresh(DisplayApp::FullRefreshDirections::Down);
       currentItem = std::make_unique<NotificationItem>(nextNotification.Title(),
                                                        nextNotification.Message(),
                                                        currentIdx + 1,

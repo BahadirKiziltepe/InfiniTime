@@ -24,6 +24,8 @@ namespace Pinetime {
         AlarmTriggered,
         Chime,
         BleRadioEnableToggle,
+        // The watch was shaken while awake. Turns the screen off if the main screen is showing.
+        ShakeToSleep,
       };
     }
   }

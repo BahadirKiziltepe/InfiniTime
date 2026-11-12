@@ -267,6 +267,8 @@ void SystemTask::Work() {
           if (!touchHandler.ProcessTouchInfo(touchPanel.GetTouchInfo())) {
             break;
           }
+          // Tapping the screen jolts the watch. That is not a shake.
+          steadyUpdates = 0;
           if (state == SystemTaskState::Running) {
             displayApp.PushMessage(Pinetime::Applications::Display::Messages::TouchEvent);
           } else {
@@ -427,6 +429,8 @@ void SystemTask::GoToRunning() {
   }
 
   state = SystemTaskState::Running;
+  // A shake that is still going on when the watch wakes up must not turn it off again
+  steadyUpdates = 0;
 };
 
 void SystemTask::GoToSleep() {
@@ -445,6 +449,8 @@ void SystemTask::GoToSleep() {
   heartRateApp.PushMessage(Pinetime::Applications::HeartRateTask::Messages::GoToSleep);
 
   state = SystemTaskState::GoingToSleep;
+  // Lifted in UpdateMotion once the arm has been still for a moment
+  shakeWakeBlocked = true;
 };
 
 void SystemTask::UpdateMotion() {
@@ -455,16 +461,59 @@ void SystemTask::UpdateMotion() {
 
   motionController.Update(motionValues.x, motionValues.y, motionValues.z, motionValues.steps);
 
+  using WakeUpMode = Pinetime::Controllers::Settings::WakeUpMode;
+  const bool shakeMode = settingsController.isWakeUpModeOn(WakeUpMode::Shake);
+  const bool raiseMode = settingsController.isWakeUpModeOn(WakeUpMode::RaiseWrist);
+
+  // The movement that put the watch to sleep must not wake it straight back up: after going to sleep,
+  // shake wake waits until the arm has been still for a moment. If it was still already, that is now.
+  if (calmUpdates >= motionSettleUpdates) {
+    shakeWakeBlocked = false;
+  }
+  const bool movingFast = motionController.CurrentShakeSpeed() > settingsController.GetShakeThreshold();
+
   if (settingsController.GetNotificationStatus() != Controllers::Settings::Notification::Sleep) {
-    if ((settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::RaiseWrist) &&
-         motionController.ShouldRaiseWake()) ||
-        (settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::Shake) &&
-         motionController.CurrentShakeSpeed() > settingsController.GetShakeThreshold())) {
+    const bool raised = raiseMode && raiseWakeHoldoff == 0 && motionController.ShouldRaiseWake();
+    const bool shaken = shakeMode && movingFast && !shakeWakeBlocked;
+    if (raised || shaken) {
       GoToRunning();
     }
   }
-  if (settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::LowerWrist) && state == SystemTaskState::Running &&
-      motionController.ShouldLowerSleep()) {
+
+  if (movingFast) {
+    calmUpdates = 0;
+  } else if (calmUpdates < motionSettleUpdates) {
+    calmUpdates++;
+  }
+  if (raiseWakeHoldoff > 0) {
+    raiseWakeHoldoff--;
+  }
+
+  if (state != SystemTaskState::Running) {
+    return;
+  }
+
+  // Awake. With shake wake on, shaking the watch again turns the screen off. Only a shake that starts
+  // after a steady moment counts, so the shake that woke the watch does not also end it. The display
+  // app has the last word: it only agrees while the main screen is showing.
+  const bool shaking = motionController.IsShaking();
+  if (shakeMode && shaking && steadyUpdates >= motionSettleUpdates) {
+    calmUpdates = 0;
+    // The last swing of a shake can look like raising the wrist
+    raiseWakeHoldoff = raiseHoldoffUpdates;
+    displayApp.PushMessage(Pinetime::Applications::Display::Messages::ShakeToSleep);
+  }
+  if (shaking) {
+    steadyUpdates = 0;
+  } else if (steadyUpdates < motionSettleUpdates) {
+    steadyUpdates++;
+  }
+
+  // Raising the wrist wakes the watch, so lowering it puts it back to sleep. The separate
+  // "Lower Wrist" setting does the same on its own.
+  const bool lowerMode = raiseMode || settingsController.isWakeUpModeOn(WakeUpMode::LowerWrist);
+  if (lowerMode && motionController.ShouldLowerSleep()) {
+    calmUpdates = 0;
     GoToSleep();
   }
 }

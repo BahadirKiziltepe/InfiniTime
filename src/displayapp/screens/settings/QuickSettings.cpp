@@ -75,14 +75,13 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
   lv_obj_set_style_local_text_font(btn1_lvl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_sys_48);
   lv_label_set_text_static(btn1_lvl, brightness.GetIcon());
 
+  // Today's step count. Same shape as the buttons around it, but it only shows the number.
   btn2 = lv_btn_create(lv_scr_act(), nullptr);
-  btn2->user_data = this;
-  lv_obj_set_event_cb(btn2, ButtonEventHandler);
+  lv_obj_set_click(btn2, false);
   lv_obj_add_style(btn2, LV_BTN_PART_MAIN, &btn_style);
   lv_obj_set_size(btn2, buttonWidth, buttonHeight);
   lv_obj_align(btn2, nullptr, LV_ALIGN_IN_TOP_RIGHT, -buttonXOffset, barHeight);
 
-  // Today's step count. Tapping the button opens the Steps screen.
   btn2_lbl = lv_label_create(btn2, nullptr);
   lv_label_set_align(btn2_lbl, LV_LABEL_ALIGN_CENTER);
   lv_label_set_text_static(btn2_lbl, Symbols::shoe);
@@ -142,9 +141,7 @@ void QuickSettings::UpdateScreen() {
 }
 
 void QuickSettings::OnButtonEvent(lv_obj_t* object) {
-  if (object == btn2) {
-    app->StartApp(Apps::Steps, DisplayApp::FullRefreshDirections::Up);
-  } else if (object == btn1) {
+  if (object == btn1) {
 
     brightness.Step();
     lv_label_set_text_static(btn1_lvl, brightness.GetIcon());
