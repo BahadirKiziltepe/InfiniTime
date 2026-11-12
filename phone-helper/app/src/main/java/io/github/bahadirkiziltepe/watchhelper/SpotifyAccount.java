@@ -178,22 +178,11 @@ final class SpotifyAccount {
     }
     closeServer();
 
-    final ServerSocket socket;
-    try {
-      socket = new ServerSocket();
-      socket.setReuseAddress(true);
-      socket.bind(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), PORT), 4);
-    } catch (IOException e) {
-      fail(round, "Could not wait for Spotify's answer on this phone (" + e.getMessage() + "). Try again in a moment.");
-      return false;
-    }
-    synchronized (this) {
-      server = socket;
-    }
-
     final String verifier = randomText(64);
     final String state = randomText(24);
-    Thread waiter = new Thread(() -> waitForAnswer(socket, round, id, verifier, state), "spotify-login");
+    // The waiting, and already the opening of the socket, happen away from the main thread:
+    // Android does not allow network work there.
+    Thread waiter = new Thread(() -> listen(round, id, verifier, state), "spotify-login");
     waiter.setDaemon(true);
     waiter.start();
 
@@ -203,8 +192,11 @@ final class SpotifyAccount {
     try {
       from.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(address)));
     } catch (RuntimeException e) {
-      fail(round, "Could not open the browser.");
-      closeServer();
+      stopWaiting();
+      synchronized (this) {
+        problem = "Could not open the browser.";
+      }
+      changed();
       return false;
     }
     log.add("spotify", "login: the browser is open, waiting for Spotify's answer");
@@ -233,6 +225,51 @@ final class SpotifyAccount {
         // It is gone either way.
       }
     }
+  }
+
+  /** Opens the address Spotify sends the browser back to, and waits there for the answer. */
+  private void listen(int round, String id, String verifier, String state) {
+    ServerSocket socket = null;
+    IOException problem = null;
+    // The socket of an earlier try may need a moment to let go of the address.
+    for (int attempt = 0; attempt < 5 && socket == null; attempt++) {
+      try {
+        ServerSocket fresh = new ServerSocket();
+        fresh.setReuseAddress(true);
+        fresh.bind(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), PORT), 4);
+        socket = fresh;
+      } catch (IOException e) {
+        problem = e;
+        try {
+          Thread.sleep(200);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          break;
+        }
+      }
+    }
+    if (socket == null) {
+      fail(round, "Could not wait for Spotify's answer on this phone (" + (problem == null ? "stopped" : problem.getMessage())
+          + "). Tap Log in to try again.");
+      return;
+    }
+    boolean current;
+    synchronized (this) {
+      current = round == loginRound;
+      if (current) {
+        server = socket;
+      }
+    }
+    if (!current) {
+      // Another login was started, or this one was stopped, in the meantime.
+      try {
+        socket.close();
+      } catch (IOException e) {
+        // Nothing to do.
+      }
+      return;
+    }
+    waitForAnswer(socket, round, id, verifier, state);
   }
 
   private void waitForAnswer(ServerSocket socket, int round, String id, String verifier, String state) {
