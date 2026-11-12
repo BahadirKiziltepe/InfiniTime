@@ -143,6 +143,13 @@ final class MusicLibrary {
   /** Spotify renamed the address of a playlist's songs in 2026. The one that works is remembered. */
   private boolean oldSongsAddress;
   private boolean oldSavedCheck;
+  /** The songs played last, as they were when the watch last opened that list, and a name for that state. */
+  private List<Song> history = new ArrayList<>();
+  private long historyAt = -HISTORY_FRESH_MS;
+  private int historyGeneration = 1;
+  private static final long HISTORY_FRESH_MS = 20_000;
+  private static final int HISTORY_MAX = 40;
+
   /** Songs the watch added to the queue. They are not in the playlist either, but nobody's "pick". */
   private final Map<String, Long> queuedFromWatch = new HashMap<>();
 
@@ -164,6 +171,9 @@ final class MusicLibrary {
     songs.clear();
     myId = "";
     queuedFromWatch.clear();
+    history = new ArrayList<>();
+    historyAt = -HISTORY_FRESH_MS;
+    historyGeneration = historyGeneration % 250 + 1;
     generation = generation % 250 + 1;
     playlistCount = -1;
     lastProblem = "";
@@ -407,6 +417,60 @@ final class MusicLibrary {
         item == null ? null : item.optString("uri", null),
         item == null || item.isNull("name") ? null : item.optString("name", null),
         json.has("smart_shuffle") && !json.isNull("smart_shuffle"), json.optBoolean("smart_shuffle", false));
+  }
+
+  /**
+   * The songs that were played last, newest first, each once, at most forty. {@code mayRefresh}
+   * allows asking Spotify again; without it the list from before is used, so that the row numbers
+   * the watch holds keep meaning the same songs.
+   */
+  List<Song> history(boolean mayRefresh) throws Problem {
+    long now = SystemClock.elapsedRealtime();
+    if (!mayRefresh || now - historyAt < HISTORY_FRESH_MS) {
+      return history;
+    }
+    Http.Reply reply = call("GET", "/me/player/recently-played?limit=50", null);
+    if (reply.code == 403) {
+      throw fail(new Problem("Log in again", "Log in to Spotify again in the phone app to allow the history.",
+          "Spotify answered 403 (" + SpotifyAccount.errorText(reply.body) + "): the login does not cover the history"));
+    }
+    JSONArray items = parse(need(reply)).optJSONArray("items");
+    List<Song> found = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
+    for (int i = 0; items != null && i < items.length() && found.size() < HISTORY_MAX; i++) {
+      JSONObject entry = items.optJSONObject(i);
+      Song song = songOf(entry == null ? null : entry.optJSONObject("track"));
+      if (song.uri != null && seen.add(song.uri)) {
+        found.add(song);
+      }
+    }
+    boolean same = found.size() == history.size();
+    for (int i = 0; same && i < found.size(); i++) {
+      same = found.get(i).uri.equals(history.get(i).uri);
+    }
+    if (!same) {
+      historyGeneration = historyGeneration % 250 + 1;
+    }
+    history = found;
+    historyAt = now;
+    return history;
+  }
+
+  /** Names the list of played songs as it is now. It changes when the list does. */
+  int historyGeneration() {
+    return historyGeneration;
+  }
+
+  /** Plays one song on its own. When it ends Spotify carries on by itself with songs like it. */
+  void playAlone(Song song) throws Problem {
+    if (song == null || song.uri == null) {
+      throw new Problem("Can't play this", "", "nothing playable at that place");
+    }
+    try {
+      player("PUT", "/me/player/play", new JSONObject().put("uris", new JSONArray().put(song.uri)).toString());
+    } catch (JSONException e) {
+      throw new Problem("Did not work", "", "could not build the request: " + e);
+    }
   }
 
   /** The songs that come next, in order. Empty when nothing is playing. */

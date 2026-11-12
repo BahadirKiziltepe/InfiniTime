@@ -75,6 +75,8 @@ namespace {
         return "Songs";
       case Kinds::Contacts:
         return "Contacts";
+      case Kinds::History:
+        return "History";
       default:
         return "";
     }
@@ -340,6 +342,7 @@ void PhoneList::OnTap(Widgets::TapPad::Events tap, TickType_t now) {
       }
       break;
     case Kinds::Songs:
+    case Kinds::History:
       if (isTap) {
         Act(Pinetime::Controllers::MusicService::ActionTap, index, "Adding...");
       } else {
@@ -505,10 +508,16 @@ bool PhoneList::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
         // The playlists are to the right of the queue
         app->StartApp(Apps::Playlists, DisplayApp::FullRefreshDirections::LeftAnim);
       }
-      return true;
+      // From the history this is the way back to the queue, which is not this screen's business
+      return kind != Kinds::History;
     case TouchEvents::SwipeRight:
-      // For everything but the queue this is the way back, which is not this screen's business
-      return kind == Kinds::Queue;
+      if (kind == Kinds::Queue) {
+        // The history is to the left of the queue
+        app->StartApp(Apps::History, DisplayApp::FullRefreshDirections::RightAnim);
+        return true;
+      }
+      // For the playlists, the songs and the contacts this is the way back. Left of the history is nothing.
+      return kind == Kinds::History;
     default:
       return false;
   }

@@ -46,6 +46,8 @@ final class PhoneFrames {
   static final int LIST_PLAYLISTS = 2;
   static final int LIST_SONGS = 3;
   static final int LIST_CONTACTS = 4;
+  /** The songs that were played last, newest first. */
+  static final int LIST_HISTORY = 5;
   /** How many rows the watch shows at once, and so how many a page holds. */
   static final int ROWS_PER_PAGE = 4;
   static final int MAX_ROW = 33;

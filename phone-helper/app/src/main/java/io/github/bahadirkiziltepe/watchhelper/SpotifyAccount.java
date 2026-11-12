@@ -47,12 +47,14 @@ final class SpotifyAccount {
   static final String DASHBOARD_URL = "https://developer.spotify.com/dashboard";
 
   private static final int PORT = 21987;
+  /** Allows seeing which songs were played last. Logins from before watch build 15 do not have it. */
+  private static final String HISTORY_SCOPE = "user-read-recently-played";
   private static final String AUTHORIZE_URL = "https://accounts.spotify.com/authorize";
   private static final String TOKEN_URL = "https://accounts.spotify.com/api/token";
   private static final String ME_URL = "https://api.spotify.com/v1/me";
-  /** See the playlists and saved songs, see what is playing and what is queued, and start songs. */
+  /** See the playlists and saved songs, what is playing, what is queued and what was played, and start songs. */
   private static final String SCOPES = "playlist-read-private playlist-read-collaborative user-library-read "
-      + "user-read-playback-state user-read-currently-playing user-modify-playback-state";
+      + "user-read-playback-state user-read-currently-playing user-modify-playback-state " + HISTORY_SCOPE;
   private static final long LOGIN_WAIT_MS = 5 * 60_000;
   private static final long EARLY_MS = 60_000;
   private static final String PREFS = "spotify-account";
@@ -77,6 +79,8 @@ final class SpotifyAccount {
   private long expiresAt;
   private String userId;
   private String userName;
+  /** What Spotify allowed at the last login, as it listed it. */
+  private String granted;
 
   private boolean loggingIn;
   private int loginRound;
@@ -94,6 +98,7 @@ final class SpotifyAccount {
     expiresAt = prefs.getLong("expires", 0);
     userId = prefs.getString("user_id", "");
     userName = prefs.getString("user_name", "");
+    granted = prefs.getString("granted", "");
   }
 
   // ---------------------------------------------------------------- state for the screen
@@ -117,6 +122,14 @@ final class SpotifyAccount {
 
   synchronized String userName() {
     return userName;
+  }
+
+  /**
+   * True when the login covers the list of songs played last. A login made before that list was
+   * added does not; logging in once more is all it takes.
+   */
+  synchronized boolean mayReadHistory() {
+    return refreshToken != null && (" " + granted + " ").contains(" " + HISTORY_SCOPE + " ");
   }
 
   /** Why the last login did not work, or empty. */
@@ -155,6 +168,7 @@ final class SpotifyAccount {
   synchronized String dump() {
     return "Client ID entered: " + (clientId.isEmpty() ? "no" : "yes (" + clientId.length() + " characters)")
         + "\nLogged in: " + (refreshToken != null ? "yes" : "no")
+        + (refreshToken != null ? ", covers the history: " + ((" " + granted + " ").contains(" " + HISTORY_SCOPE + " ") ? "yes" : "no") : "")
         + (refreshToken != null ? ", token good for another " + Math.max(0, (expiresAt - System.currentTimeMillis()) / 1000) + " s" : "")
         + (problem.isEmpty() ? "" : "\nLast problem: " + problem);
   }
@@ -344,6 +358,7 @@ final class SpotifyAccount {
       JSONObject json = new JSONObject(reply.body);
       String access = json.getString("access_token");
       String refresh = json.optString("refresh_token", "");
+      String allowed = json.optString("scope", "");
       long expires = System.currentTimeMillis() + json.optLong("expires_in", 3600) * 1000;
       if (refresh.isEmpty()) {
         fail(round, "Spotify's answer was incomplete. Try again.");
@@ -374,6 +389,7 @@ final class SpotifyAccount {
         expiresAt = expires;
         userId = user;
         userName = name.isEmpty() ? user : name;
+        granted = allowed;
         loggingIn = false;
         problem = "";
       }
@@ -465,13 +481,15 @@ final class SpotifyAccount {
     expiresAt = 0;
     userId = "";
     userName = "";
+    granted = "";
   }
 
   private void save() {
     SharedPreferences.Editor editor = prefs.edit();
     synchronized (this) {
       editor.putString("client_id", clientId).putString("access", accessToken).putString("refresh", refreshToken)
-          .putLong("expires", expiresAt).putString("user_id", userId).putString("user_name", userName);
+          .putLong("expires", expiresAt).putString("user_id", userId).putString("user_name", userName)
+          .putString("granted", granted);
     }
     editor.apply();
   }

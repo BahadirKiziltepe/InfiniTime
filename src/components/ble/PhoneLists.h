@@ -19,7 +19,9 @@ namespace Pinetime {
      */
     class PhoneLists {
     public:
-      enum class Kinds : uint8_t { None = 0, Queue = 1, Playlists = 2, Songs = 3, Contacts = 4 };
+      // History is the list of songs that were played last, newest first
+      enum class Kinds : uint8_t { None = 0, Queue = 1, Playlists = 2, Songs = 3, Contacts = 4, History = 5 };
+      static constexpr uint8_t LastKind = static_cast<uint8_t>(Kinds::History);
 
       static constexpr uint8_t RowsPerPage = 4;
       // A row's text: two lines on the screen

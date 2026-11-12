@@ -272,7 +272,7 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       notificationManager.AppendCaller(payload, payloadLength);
       break;
     case PhoneListBegin: {
-      if (length < PhoneListBeginSize || message[1] > static_cast<uint8_t>(PhoneLists::Kinds::Contacts)) {
+      if (length < PhoneListBeginSize || message[1] > PhoneLists::LastKind) {
         break;
       }
       lists.Begin(static_cast<PhoneLists::Kinds>(message[1]),
@@ -309,7 +309,7 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       }
       break;
     case PhoneListResult:
-      if (length >= 3 && message[1] <= static_cast<uint8_t>(PhoneLists::Kinds::Contacts)) {
+      if (length >= 3 && message[1] <= PhoneLists::LastKind) {
         lists.SetResult(static_cast<PhoneLists::Kinds>(message[1]), message[2], payload + 2, payloadLength - 2);
       }
       break;

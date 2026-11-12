@@ -292,7 +292,7 @@ void DisplayApp::Refresh() {
         const bool leaveAlone = currentApp == Apps::Call || currentApp == Apps::FirmwareUpdate || currentApp == Apps::PassKey;
         if (!leaveAlone && IsPastSleepTime()) {
           const bool fromBelow = currentApp == Apps::Clock || currentApp == Apps::Queue || currentApp == Apps::Playlists ||
-                                 currentApp == Apps::Songs;
+                                 currentApp == Apps::Songs || currentApp == Apps::History;
           returnAppStack.Reset();
           appStackDirections.Reset();
           returnAppStack.Push(Apps::Clock);
@@ -358,7 +358,7 @@ void DisplayApp::Refresh() {
         if (currentApp == Apps::Launcher || currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview ||
             currentApp == Apps::Call || currentApp == Apps::QuickSettings || currentApp == Apps::Settings ||
             currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs ||
-            currentApp == Apps::Contacts || currentApp == Apps::Steps) {
+            currentApp == Apps::History || currentApp == Apps::Contacts || currentApp == Apps::Steps) {
           LoadScreen(Apps::Clock, DisplayApp::FullRefreshDirections::None);
           // The main screen is the start of every way back again. Without this, each time the watch
           // fell asleep on one of these screens an entry was left behind, until the list was full and
@@ -506,7 +506,7 @@ void DisplayApp::Refresh() {
           //   notifications  ->  contacts
           //   (the call, while there is one)
           //   MAIN SCREEN        left and right change the volume there
-          //   queue          ->  playlists  ->  songs
+          //   history  <-  queue  ->  playlists  ->  songs
           //
           // The main screen has no app launcher, and a double tap does not put the watch to sleep
           // because on that screen it means "next track".
@@ -559,7 +559,8 @@ void DisplayApp::Refresh() {
       case Messages::ButtonLongPressed:
         if (currentApp != Apps::Clock) {
           // The queue and the lists next to it are below the main screen, everything else is above it
-          if (currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs) {
+          if (currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs ||
+              currentApp == Apps::History) {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Down);
           } else {
             LoadNewScreen(Apps::Clock, DisplayApp::FullRefreshDirections::Up);
@@ -694,11 +695,13 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
     case Apps::Queue:
     case Apps::Playlists:
     case Apps::Songs:
-    case Apps::Contacts: {
+    case Apps::Contacts:
+    case Apps::History: {
       using Kinds = Controllers::PhoneLists::Kinds;
       const Kinds kind = app == Apps::Queue       ? Kinds::Queue
                          : app == Apps::Playlists ? Kinds::Playlists
                          : app == Apps::Songs     ? Kinds::Songs
+                         : app == Apps::History   ? Kinds::History
                                                   : Kinds::Contacts;
       currentScreen = std::make_unique<Screens::PhoneList>(this,
                                                            kind,

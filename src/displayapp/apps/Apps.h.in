@@ -18,6 +18,7 @@ namespace Pinetime {
       Playlists,
       Songs,
       Contacts,
+      History,
       Timer,
       Alarm,
       FlashLight,

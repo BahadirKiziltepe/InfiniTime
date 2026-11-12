@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
   private View accountButtons;
   private TextView setUpButton;
   private TextView logoutButton;
+  private TextView loginAgainButton;
   private LinearLayout accountSteps;
   private EditText clientIdField;
   private TextView loginButton;
@@ -225,7 +226,11 @@ public class MainActivity extends Activity {
       render();
     });
     logoutButton = ui.button("Log out", Ui.TONAL, v -> confirmLogout());
-    accountButtons = ui.add(account, ui.flow(setUpButton, logoutButton), 14);
+    loginAgainButton = ui.button("Log in again", Ui.FILLED, v -> {
+      core.account.startLogin(this);
+      render();
+    });
+    accountButtons = ui.add(account, ui.flow(setUpButton, loginAgainButton, logoutButton), 14);
     accountSteps = ui.column();
     account.addView(accountSteps);
     buildAccountSteps();
@@ -455,10 +460,19 @@ public class MainActivity extends Activity {
       String name = account.userName();
       accountStatus.set(ui.good, "Connected to Spotify", name.isEmpty() ? "" : "Logged in as " + name);
       String trouble = core.library.lastProblem();
-      accountNote.setText(trouble.isEmpty()
-          ? "On the watch: go down from the main screen for the queue, and right from there for your playlists."
-          : "Last problem: " + trouble);
-      accountNote.setTextColor(trouble.isEmpty() ? ui.soft : ui.warn);
+      boolean history = account.mayReadHistory();
+      if (waiting) {
+        accountNote.setText("Finish the login in the browser, then come back here.");
+      } else if (!history) {
+        accountNote.setText("The list of played songs on the watch needs one more permission from Spotify. Tap Log in "
+            + "again and allow it; nothing else changes.");
+      } else {
+        accountNote.setText(trouble.isEmpty()
+            ? "On the watch: go down from the main screen for the queue. Your playlists are to its right, the "
+                + "songs played last to its left."
+            : "Last problem: " + trouble);
+      }
+      accountNote.setTextColor(waiting || (history && trouble.isEmpty()) ? ui.soft : ui.warn);
     } else {
       if (waiting) {
         accountStatus.set(ui.warn, "Waiting for the login", "Finish it in the browser, then come back here.");
@@ -472,6 +486,7 @@ public class MainActivity extends Activity {
     boolean open = !loggedIn && (accountOpen || waiting || !account.clientId().isEmpty());
     Ui.show(setUpButton, !loggedIn && !open);
     Ui.show(logoutButton, loggedIn);
+    Ui.show(loginAgainButton, loggedIn && !account.mayReadHistory());
     Ui.show(accountButtons, loggedIn || !open);
     Ui.show(accountSteps, open);
     loginButton.setText(waiting ? "Open the login again" : "Log in to Spotify");

@@ -27,9 +27,11 @@ namespace Pinetime {
        *
        * - Swipe up for the next page, swipe down for the one before.
        * - Queue: only shown. It hangs below the main screen: swiping down on its first page goes back
-       *   there, and the playlists are one swipe to the left further on.
+       *   there. The playlists are one swipe to the left further on, the history one swipe to the right.
        * - Playlists: a tap opens the songs, a hold plays the playlist.
        * - Songs: a tap adds the song to the queue, a hold plays it in its playlist.
+       * - History (the songs played last, to the left of the queue): a tap adds the song to the
+       *   queue, a hold plays it on its own, after which Spotify carries on with songs like it.
        * - Contacts: a tap asks "Call ...?". A second tap makes the phone place the call; holding the
        *   screen, or a swipe, takes the question back. It also goes away by itself after ten seconds.
        * - A star in front of a song means Spotify picked it itself (Smart Shuffle), the play sign

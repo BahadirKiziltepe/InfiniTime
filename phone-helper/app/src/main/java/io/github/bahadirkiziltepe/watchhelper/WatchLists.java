@@ -43,7 +43,7 @@ final class WatchLists {
     return thread;
   });
   /** The newest request number per list. An answer to an older request would only be thrown away by the watch. */
-  private final AtomicIntegerArray newest = new AtomicIntegerArray(PhoneFrames.LIST_CONTACTS + 1);
+  private final AtomicIntegerArray newest = new AtomicIntegerArray(PhoneFrames.LIST_HISTORY + 1);
 
   // The song the mark for "Spotify picked this" is being worked out for.
   private volatile int songRound;
@@ -98,7 +98,7 @@ final class WatchLists {
   }
 
   private static boolean known(int kind) {
-    return kind >= PhoneFrames.LIST_QUEUE && kind <= PhoneFrames.LIST_CONTACTS;
+    return kind >= PhoneFrames.LIST_QUEUE && kind <= PhoneFrames.LIST_HISTORY;
   }
 
   private void page(final int kind, final int token, final int offset, final int parent) {
@@ -219,6 +219,18 @@ final class WatchLists {
         return PhoneFrames.listPage(kind, token, start, Math.max(page.total, 0), library.generation(), title, note, rows);
       }
 
+      if (kind == PhoneFrames.LIST_HISTORY) {
+        // Asking for the first page is opening the list: look what has been played since.
+        List<MusicLibrary.Song> played = library.history(offset == 0);
+        int start = clamp(offset, played.size());
+        List<PhoneFrames.Row> rows = new ArrayList<>();
+        for (int i = start; i < played.size() && rows.size() < PhoneFrames.ROWS_PER_PAGE; i++) {
+          rows.add(new PhoneFrames.Row(played.get(i).label(), 0));
+        }
+        String note = played.isEmpty() ? "Spotify has no played songs to show yet." : "";
+        return PhoneFrames.listPage(kind, token, start, played.size(), library.historyGeneration(), "", note, rows);
+      }
+
       List<MusicLibrary.Song> queue = library.queue();
       int start = clamp(offset, queue.size());
       List<MusicLibrary.Song> shown = new ArrayList<>();
@@ -263,6 +275,21 @@ final class WatchLists {
 
   private List<byte[]> musicAction(int kind, int action, int index, int parent, int snapshot) {
     try {
+      if (kind == PhoneFrames.LIST_HISTORY) {
+        List<MusicLibrary.Song> played = library.history(false);
+        if (snapshot != library.historyGeneration() || index >= played.size()) {
+          return PhoneFrames.listResult(kind, PhoneFrames.RESULT_STALE, "");
+        }
+        if (action == ACTION_HOLD) {
+          library.playAlone(played.get(index));
+          log.add("lists", "watch: play a song from the history on its own");
+        } else {
+          library.addToQueue(played.get(index));
+          log.add("lists", "watch: add a song from the history to the queue");
+        }
+        actionsDone++;
+        return PhoneFrames.listResult(kind, PhoneFrames.RESULT_DONE, action == ACTION_HOLD ? "Playing" : "Queued");
+      }
       if (snapshot != library.generation()) {
         return PhoneFrames.listResult(kind, PhoneFrames.RESULT_STALE, "");
       }
