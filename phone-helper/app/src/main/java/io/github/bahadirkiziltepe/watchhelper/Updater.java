@@ -387,6 +387,11 @@ final class Updater {
           .setKeepBond(false)
           .setForeground(false)
           .setDisableNotification(true)
+          // Essential. The watch's update code only copes with pieces of at most 20 bytes
+          // (DfuService.cpp, DfuImage::Append). By default this library asks the watch for bigger
+          // messages and then sends bigger pieces, which that code would write past its buffer.
+          // With the request disabled the library always sends 20 bytes at a time.
+          .disableMtuRequest()
           .setZip(file.getAbsolutePath())
           .start(app, UpdateService.class);
     } catch (RuntimeException e) {

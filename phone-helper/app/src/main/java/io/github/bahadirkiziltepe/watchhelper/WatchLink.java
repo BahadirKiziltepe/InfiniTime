@@ -21,6 +21,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Handler;
+import android.os.ParcelUuid;
 import android.os.SystemClock;
 
 import java.time.ZonedDateTime;
@@ -42,6 +43,11 @@ import java.util.UUID;
  *
  * <p>The watch's address is kept only in this app's private storage on the phone. It is never
  * written to the log or the report.
+ *
+ * <p>This link deliberately never asks the watch for a bigger message size. A watch update shares
+ * this connection, and the watch's update code only copes with 20-byte pieces, which is what the
+ * default size guarantees. Longer song titles still arrive whole: Android splits them up and the
+ * watch puts them back together.
  */
 @SuppressLint("MissingPermission") // Every entry point checks the permission, and calls are guarded.
 final class WatchLink {
@@ -66,11 +72,19 @@ final class WatchLink {
   private static final UUID CH_ZONE = UUID.fromString("00002a0f-0000-1000-8000-00805f9b34fb");
   private static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
+  // What the watch announces while it is not connected: its name, plus these two services.
+  private static final ParcelUuid ANNOUNCED_UPDATE_SERVICE =
+      ParcelUuid.fromString("00001530-1212-efde-1523-785feabcd123");
+  private static final ParcelUuid ANNOUNCED_HEART_RATE_SERVICE =
+      ParcelUuid.fromString("0000180d-0000-1000-8000-00805f9b34fb");
+
   private static final UUID[] MUSIC = {CH_EVENT, CH_STATUS, CH_ARTIST, CH_TRACK, CH_ALBUM, CH_POSITION, CH_LENGTH};
   private static final UUID[] CLOCK = {CH_TIME, CH_ZONE};
-  /** Order in which changes are sent. The clock goes first; position last so it is as fresh as possible. */
-  private static final UUID[] SEND_ORDER =
-      {CH_TIME, CH_ZONE, CH_TRACK, CH_ARTIST, CH_ALBUM, CH_LENGTH, CH_STATUS, CH_POSITION};
+  /**
+   * Order in which changes are sent. The clock goes first; position last so it is as fresh as
+   * possible. The album is left out: the watch has a slot for it but its screen does not show it.
+   */
+  private static final UUID[] SEND_ORDER = {CH_TIME, CH_ZONE, CH_TRACK, CH_ARTIST, CH_LENGTH, CH_STATUS, CH_POSITION};
 
   private static final String PREFS = "watch";
   private static final String KEY_ADDRESS = "address";
@@ -87,15 +101,13 @@ final class WatchLink {
   private static final long BUSY_RETRY_MS = 300;
   private static final int MAX_BUSY_RETRIES = 10;
   private static final int DEFAULT_MTU = 23;
-  private static final int WANTED_MTU = 256;
   private static final long POSITION_DRIFT_MS = 1_500;
   /** The watch keeps good time by itself; this only corrects slow drift. */
   private static final long CLOCK_RESYNC_MS = 6 * 60 * 60 * 1000L;
 
   private static final int STAGE_IDLE = 0;
   private static final int STAGE_NOTIFY = 1;
-  private static final int STAGE_MTU = 2;
-  private static final int STAGE_DONE = 3;
+  private static final int STAGE_DONE = 2;
 
   private final Context app;
   private final Handler main;
@@ -154,6 +166,9 @@ final class WatchLink {
 
   /** While a watch update is being sent, nothing else is written to the watch. */
   private boolean paused;
+
+  /** Set if the watch would not take a title longer than one message. Titles are then cut shorter. */
+  private boolean shortTextOnly;
 
   // Counters for the report.
   private int links;
@@ -470,11 +485,17 @@ final class WatchLink {
       if (name == null) {
         name = nameOf(result.getDevice());
       }
-      if (!isWatchName(name)) {
-        return;
+      boolean named = isWatchName(name);
+      if (!named) {
+        // The name travels in a second, optional packet. Without it, go by the announced services.
+        List<ParcelUuid> services = record == null ? null : record.getServiceUuids();
+        if (name != null || services == null || !services.contains(ANNOUNCED_UPDATE_SERVICE)
+            || !services.contains(ANNOUNCED_HEART_RATE_SERVICE)) {
+          return;
+        }
       }
       stopScan();
-      log.add("watch", "found the watch nearby");
+      log.add("watch", named ? "found the watch nearby" : "found a device nearby that announces itself like the watch");
       remember(result.getDevice());
       open(result.getDevice(), false);
     }
@@ -627,7 +648,7 @@ final class WatchLink {
           problem("could not switch on button messages (code " + rc + ")");
         }
       }
-      askForMtu();
+      finishSetup();
     }
 
     @Override
@@ -640,23 +661,15 @@ final class WatchLink {
       if (!notifyOn) {
         problem("the watch refused to switch on button messages (code " + status + ")");
       }
-      askForMtu();
+      finishSetup();
     }
 
     @Override
     public void onMtuChanged(BluetoothGatt g, int newMtu, int status) {
-      if (g != gatt) {
-        return;
-      }
-      if (status == BluetoothGatt.GATT_SUCCESS && newMtu >= DEFAULT_MTU) {
+      // This link never asks for a different size, but another app on the same connection may.
+      if (g == gatt && status == BluetoothGatt.GATT_SUCCESS && newMtu >= DEFAULT_MTU && newMtu != mtu) {
         mtu = newMtu;
-      }
-      if (setupStage == STAGE_MTU) {
-        main.removeCallbacks(stepTimeout);
-        finishSetup();
-      } else if (ready) {
-        rebuildDesired();
-        pump();
+        log.add("watch", "message size is now " + mtu + " (changed by another app)");
       }
     }
 
@@ -689,6 +702,7 @@ final class WatchLink {
         problem("the watch refused \"" + nameOf(id) + "\" (code " + status + ")");
         if (!isLive(id)) {
           failed.put(id, value);
+          fallBackToShortText(id, value);
         }
       }
       listener.onWatchChanged();
@@ -745,34 +759,9 @@ final class WatchLink {
     }
   }
 
-  private void askForMtu() {
-    BluetoothGatt g = gatt;
-    if (g == null) {
-      return;
-    }
-    setupStage = STAGE_MTU;
-    boolean asked = false;
-    try {
-      asked = g.requestMtu(WANTED_MTU);
-    } catch (RuntimeException ignored) {
-      // Carry on with the small default size.
-    }
-    if (asked) {
-      main.postDelayed(stepTimeout, STEP_TIMEOUT_MS);
-    } else {
-      finishSetup();
-    }
-  }
-
   private void onStepTimeout() {
-    if (gatt == null) {
-      return;
-    }
-    if (setupStage == STAGE_NOTIFY) {
+    if (gatt != null && setupStage == STAGE_NOTIFY) {
       problem("no answer when switching on button messages; carrying on");
-      askForMtu();
-    } else if (setupStage == STAGE_MTU) {
-      log.add("watch", "no answer about message size; carrying on with " + mtu);
       finishSetup();
     }
   }
@@ -821,10 +810,9 @@ final class WatchLink {
   }
 
   private void rebuildDesired() {
-    int limit = Math.min(WatchText.MAX_BYTES, Math.max(1, mtu - 3));
+    int limit = shortTextOnly ? Math.max(1, Math.min(WatchText.MAX_BYTES, mtu - 3)) : WatchText.MAX_BYTES;
     desired.put(CH_TRACK, WatchText.encode(npTitle, limit));
     desired.put(CH_ARTIST, WatchText.encode(npArtist, limit));
-    desired.put(CH_ALBUM, WatchText.encode(npAlbum, limit));
     desired.put(CH_LENGTH, WatchText.int32(npDurationMs / 1000));
     desired.put(CH_STATUS, new byte[] {(byte) (npPlaying ? 1 : 0)});
 
@@ -951,9 +939,23 @@ final class WatchLink {
     problem("no answer from the watch for \"" + nameOf(id) + "\"");
     if (!isLive(id) && value != null) {
       failed.put(id, value);
+      fallBackToShortText(id, value);
     }
     listener.onWatchChanged();
     pump();
+  }
+
+  /**
+   * A title longer than one message is split up by Android and put back together by the watch.
+   * If the watch does not manage that, stop relying on it and send titles that fit one message.
+   */
+  private void fallBackToShortText(UUID id, byte[] value) {
+    boolean text = id.equals(CH_TRACK) || id.equals(CH_ARTIST);
+    if (text && !shortTextOnly && value.length > mtu - 3) {
+      shortTextOnly = true;
+      log.add("watch", "the watch did not take a long title; sending shorter ones from now on");
+      rebuildDesired();
+    }
   }
 
   // ---------------------------------------------------------------- clock and updates
@@ -1044,7 +1046,7 @@ final class WatchLink {
     }
     sb.append(chars.containsKey(CH_EVENT) ? " buttons" : " (no buttons)").append('\n');
     sb.append("Clock set on this link: ").append(yesNo(clockSet)).append(", paused for an update: ")
-        .append(yesNo(paused)).append('\n');
+        .append(yesNo(paused)).append(", short titles only: ").append(yesNo(shortTextOnly)).append('\n');
     sb.append("Sent to the watch: ").append(writesOk).append(" ok, ").append(writesFailed).append(" failed\n");
     sb.append("Heard from the watch: ").append(eventsHeard).append(lastEvent.isEmpty() ? "" : ", last: " + lastEvent)
         .append('\n');
