@@ -46,6 +46,8 @@ namespace Pinetime {
         static constexpr const char* plus = "\xEF\x81\xA7";
         static constexpr const char* shuffle = "\xEF\x81\xB4";
         static constexpr const char* repeat = "\xEF\x81\xB9";
+        static constexpr const char* star = "\xEF\x80\x85";
+        static constexpr const char* checkmark = "\xEF\x80\x8C";
 
         // fontawesome_weathericons.c
         // static constexpr const char* sun = "\xEF\x86\x85";

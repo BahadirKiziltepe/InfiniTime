@@ -62,11 +62,40 @@ namespace Pinetime {
       static const char EVENT_MUSIC_PREV = 0x04;
       static const char EVENT_MUSIC_VOLUP = 0x05;
       static const char EVENT_MUSIC_VOLDOWN = 0x06;
+      // The second row of buttons on the watch face. Stock companion apps ignore these codes;
+      // the Watch Helper phone app acts on them.
+      static const char EVENT_MUSIC_SHUFFLE = 0x10;
+      static const char EVENT_MUSIC_REPEAT = 0x11;
+      static const char EVENT_MUSIC_SAVE = 0x12;
+
+      // What the player's shuffle, repeat and "save this song" buttons currently show, as told
+      // by the phone in one three-byte write. Unknown until the phone has sent it.
+      static constexpr uint8_t StateUnknown = 0xff;
+      static constexpr uint8_t ShuffleOff = 0;
+      static constexpr uint8_t ShuffleOn = 1;
+      static constexpr uint8_t ShuffleSmart = 2;
+      static constexpr uint8_t RepeatOff = 0;
+      static constexpr uint8_t RepeatAll = 1;
+      static constexpr uint8_t RepeatOne = 2;
+      static constexpr uint8_t SavedNo = 0;
+      static constexpr uint8_t SavedYes = 1;
+
+      uint8_t getShuffleState() const {
+        return shuffleState;
+      }
+
+      uint8_t getRepeatState() const {
+        return repeatState;
+      }
+
+      uint8_t getSavedState() const {
+        return savedState;
+      }
 
       enum MusicStatus { NotPlaying = 0x00, Playing = 0x01 };
 
     private:
-      struct ble_gatt_chr_def characteristicDefinition[14];
+      struct ble_gatt_chr_def characteristicDefinition[15];
       struct ble_gatt_svc_def serviceDefinition[2];
 
       uint16_t eventHandle {};
@@ -87,6 +116,10 @@ namespace Pinetime {
 
       bool repeat {false};
       bool shuffle {false};
+
+      uint8_t shuffleState {StateUnknown};
+      uint8_t repeatState {StateUnknown};
+      uint8_t savedState {StateUnknown};
 
       NimbleController& nimble;
     };

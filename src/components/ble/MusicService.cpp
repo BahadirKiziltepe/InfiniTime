@@ -47,6 +47,8 @@ namespace {
   constexpr ble_uuid128_t msPlaybackSpeedCharUuid {CharUuid(0x0a, 0x00)};
   constexpr ble_uuid128_t msRepeatCharUuid {CharUuid(0x0b, 0x00)};
   constexpr ble_uuid128_t msShuffleCharUuid {CharUuid(0x0c, 0x00)};
+  // Not part of stock InfiniTime: three bytes, the state of the shuffle, repeat and save buttons.
+  constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
 
   constexpr uint8_t MaxStringSize {40};
 
@@ -109,7 +111,11 @@ Pinetime::Controllers::MusicService::MusicService(Pinetime::Controllers::NimbleC
                                   .access_cb = MusicCallback,
                                   .arg = this,
                                   .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_READ};
-  characteristicDefinition[13] = {0};
+  characteristicDefinition[13] = {.uuid = &msButtonsCharUuid.u,
+                                  .access_cb = MusicCallback,
+                                  .arg = this,
+                                  .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_READ};
+  characteristicDefinition[14] = {0};
 
   serviceDefinition[0] = {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &msUuid.u, .characteristics = characteristicDefinition};
   serviceDefinition[1] = {0};
@@ -163,6 +169,12 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
       repeat = s[0];
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msShuffleCharUuid.u) == 0) {
       shuffle = s[0];
+    } else if (ble_uuid_cmp(ctxt->chr->uuid, &msButtonsCharUuid.u) == 0) {
+      if (notifSize >= 3) {
+        shuffleState = static_cast<uint8_t>(s[0]);
+        repeatState = static_cast<uint8_t>(s[1]);
+        savedState = static_cast<uint8_t>(s[2]);
+      }
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msPositionCharUuid.u) == 0) {
       trackProgress = (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3];
       trackProgressUpdateTime = xTaskGetTickCount();

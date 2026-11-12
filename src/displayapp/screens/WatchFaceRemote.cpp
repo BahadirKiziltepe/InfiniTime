@@ -58,6 +58,17 @@ namespace {
   // Longest track for which the progress bar is drawn (keeps the maths in 32 bits)
   constexpr int maxTrackLength = 2000000;
 
+  // Second row: dim while the phone has not said what the player's buttons show, light when the
+  // function is off, green when it is on.
+  constexpr lv_color_t extraUnknownColor = Colors::gray;
+  constexpr lv_color_t extraOffColor = Colors::lightGray;
+  constexpr lv_color_t extraOnColor = LV_COLOR_MAKE(0x1e, 0xd7, 0x60);
+
+  // Smart shuffle: the shuffle arrows with a star. Repeat one song: the repeat arrows with a 1.
+  constexpr const char* shuffleSmartText = "\xEF\x81\xB4\xEF\x80\x85";
+  constexpr const char* repeatOneText = "\xEF\x81\xB9"
+                                        "1";
+
   // Text the music service reports as the artist before the phone has sent anything
   constexpr const char* servicePlaceholderArtist = "Not Playing";
 
@@ -164,24 +175,24 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   lv_obj_set_event_cb(btnNext, ButtonEventHandler);
   lv_label_set_text_static(lv_label_create(btnNext, nullptr), Symbols::stepForward);
 
-  // Second row: shuffle / repeat / add.
-  // The stock companion apps only understand play, pause, next, previous and volume, so these
-  // need a phone-side helper. Until it exists they are drawn dimmed and do not react to taps.
+  // Second row: shuffle / repeat / save.
+  // The stock companion apps only understand play, pause, next, previous and volume. These three
+  // are acted on by the Watch Helper phone app, which also reports what each one currently shows.
   lv_style_init(&extraBtnStyle);
   lv_style_set_radius(&extraBtnStyle, LV_STATE_DEFAULT, 16);
   lv_style_set_bg_color(&extraBtnStyle, LV_STATE_DEFAULT, Colors::bgDark);
 
-  auto makeExtraButton = [this](lv_align_t align, lv_coord_t offsetX, const char* symbol) {
+  auto makeExtraButton = [this](lv_align_t align, lv_coord_t offsetX, lv_obj_t*& icon) {
     lv_obj_t* button = MakeButton(&extraBtnStyle, extraButtonHeight, align, offsetX, 0);
-    lv_obj_set_click(button, false);
-    lv_obj_t* icon = lv_label_create(button, nullptr);
-    lv_obj_set_style_local_text_color(icon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::gray);
-    lv_label_set_text_static(icon, symbol);
+    button->user_data = this;
+    lv_obj_set_event_cb(button, ButtonEventHandler);
+    icon = lv_label_create(button, nullptr);
     return button;
   };
-  btnShuffle = makeExtraButton(LV_ALIGN_IN_BOTTOM_LEFT, buttonMargin, Symbols::shuffle);
-  btnRepeat = makeExtraButton(LV_ALIGN_IN_BOTTOM_MID, 0, Symbols::repeat);
-  btnAdd = makeExtraButton(LV_ALIGN_IN_BOTTOM_RIGHT, -buttonMargin, Symbols::plus);
+  btnShuffle = makeExtraButton(LV_ALIGN_IN_BOTTOM_LEFT, buttonMargin, labelShuffle);
+  btnRepeat = makeExtraButton(LV_ALIGN_IN_BOTTOM_MID, 0, labelRepeat);
+  btnAdd = makeExtraButton(LV_ALIGN_IN_BOTTOM_RIGHT, -buttonMargin, labelAdd);
+  UpdateExtraButtons();
 
   taskRefresh = lv_task_create(RefreshTaskCallback, LV_DISP_DEF_REFR_PERIOD, LV_TASK_PRIO_MID, this);
   Refresh();
@@ -284,6 +295,50 @@ void WatchFaceRemote::UpdateMusic(TickType_t now) {
     lv_obj_set_hidden(barProgress, true);
     progressVisible = false;
   }
+
+  UpdateExtraButtons();
+}
+
+void WatchFaceRemote::UpdateExtraButtons() {
+  using Music = Controllers::MusicService;
+
+  // Whatever the phone said last is only worth showing while the phone is still there.
+  const bool connected = bleController.IsConnected();
+  const uint8_t shuffle = connected ? musicService.getShuffleState() : Music::StateUnknown;
+  const uint8_t repeat = connected ? musicService.getRepeatState() : Music::StateUnknown;
+  const uint8_t saved = connected ? musicService.getSavedState() : Music::StateUnknown;
+
+  if (shuffle != shownShuffle) {
+    shownShuffle = shuffle;
+    const bool on = shuffle == Music::ShuffleOn || shuffle == Music::ShuffleSmart;
+    const lv_color_t color = on ? extraOnColor : (shuffle == Music::ShuffleOff ? extraOffColor : extraUnknownColor);
+    lv_obj_set_style_local_text_color(labelShuffle, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, color);
+    lv_label_set_text_static(labelShuffle, shuffle == Music::ShuffleSmart ? shuffleSmartText : Symbols::shuffle);
+  }
+
+  if (repeat != shownRepeat) {
+    shownRepeat = repeat;
+    const bool on = repeat == Music::RepeatAll || repeat == Music::RepeatOne;
+    const lv_color_t color = on ? extraOnColor : (repeat == Music::RepeatOff ? extraOffColor : extraUnknownColor);
+    lv_obj_set_style_local_text_color(labelRepeat, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, color);
+    lv_label_set_text_static(labelRepeat, repeat == Music::RepeatOne ? repeatOneText : Symbols::repeat);
+  }
+
+  if (saved != shownSaved) {
+    shownSaved = saved;
+    const bool on = saved == Music::SavedYes;
+    const lv_color_t color = on ? extraOnColor : (saved == Music::SavedNo ? extraOffColor : extraUnknownColor);
+    lv_obj_set_style_local_text_color(labelAdd, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, color);
+    lv_label_set_text_static(labelAdd, on ? Symbols::checkmark : Symbols::plus);
+  }
+}
+
+void WatchFaceRemote::SendExtra(char event) {
+  if (!bleController.IsConnected()) {
+    return;
+  }
+  musicService.event(event);
+  motorController.RunForDuration(volumeBuzzMs);
 }
 
 void WatchFaceRemote::SetPlaying(bool isPlaying) {
@@ -311,6 +366,12 @@ void WatchFaceRemote::OnButtonEvent(lv_obj_t* obj, lv_event_t event) {
       playOverride = true;
       playOverrideTick = xTaskGetTickCount();
     }
+  } else if (obj == btnShuffle) {
+    SendExtra(Controllers::MusicService::EVENT_MUSIC_SHUFFLE);
+  } else if (obj == btnRepeat) {
+    SendExtra(Controllers::MusicService::EVENT_MUSIC_REPEAT);
+  } else if (obj == btnAdd) {
+    SendExtra(Controllers::MusicService::EVENT_MUSIC_SAVE);
   }
 }
 

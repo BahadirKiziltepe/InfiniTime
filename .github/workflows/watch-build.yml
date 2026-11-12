@@ -76,6 +76,14 @@ jobs:
           [ "${#img[@]}" -eq 1 ] && [ -f "${img[0]}" ]
           size="$(stat -c %s "${img[0]}")"
 
+          # The watch's own updater only switches to a new image if the last 200-byte block it
+          # stores is a partial one. An image that is an exact multiple would install and then
+          # be ignored, so never publish one: change anything and build again.
+          if [ $((size % 200)) -eq 0 ]; then
+            echo "Image size ${size} is an exact multiple of 200 bytes; the watch would not switch to it."
+            exit 1
+          fi
+
           mkdir -p out
           cp "${dfu[0]}" "out/watch-build-${GITHUB_RUN_NUMBER}.zip"
 

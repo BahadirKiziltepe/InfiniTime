@@ -57,6 +57,8 @@ namespace Pinetime {
       private:
         void ChangeVolume(bool up);
         void UpdateMusic(TickType_t now);
+        void UpdateExtraButtons();
+        void SendExtra(char event);
         void SetPlaying(bool isPlaying);
 
         Utility::DirtyValue<std::chrono::time_point<std::chrono::system_clock, std::chrono::minutes>> currentDateTime {};
@@ -76,6 +78,9 @@ namespace Pinetime {
         lv_obj_t* btnShuffle;
         lv_obj_t* btnRepeat;
         lv_obj_t* btnAdd;
+        lv_obj_t* labelShuffle;
+        lv_obj_t* labelRepeat;
+        lv_obj_t* labelAdd;
 
         lv_style_t btnStyle;
         lv_style_t extraBtnStyle;
@@ -102,6 +107,11 @@ namespace Pinetime {
 
         bool volumeHintVisible = false;
         TickType_t volumeHintTick = 0;
+
+        /** What the second row currently shows. Starts at a value no state uses, so the first update draws it. */
+        uint8_t shownShuffle = 0xfe;
+        uint8_t shownRepeat = 0xfe;
+        uint8_t shownSaved = 0xfe;
 
         lv_task_t* taskRefresh;
         Widgets::StatusIcons statusIcons;

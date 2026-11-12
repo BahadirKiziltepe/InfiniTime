@@ -381,6 +381,14 @@ void DfuService::DfuImage::Append(uint8_t* data, size_t size) {
   if (!ready)
     return;
   ASSERT(size <= 20);
+  // The image arrives in pieces of at most 20 bytes, which fill the buffer in exact steps. The
+  // assert above is compiled out of release builds, so refuse a piece that would not fit rather
+  // than write past the end of the buffer. The image then never completes, the update fails, and
+  // the watch keeps the firmware it has.
+  if (size > bufferSize - bufferWriteIndex) {
+    ready = false;
+    return;
+  }
 
   std::memcpy(tempBuffer + bufferWriteIndex, data, size);
   bufferWriteIndex += size;
