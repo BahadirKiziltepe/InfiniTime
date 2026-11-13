@@ -272,7 +272,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       return "Watch alerts: silent… The watch does not buzz or light up for anything until you switch this back. "
           + "What comes in still collects on its notification screen.";
     }
-    return "✓ Watch alerts: on. The watch buzzes for notifications and calls.";
+    return "✓ Watch alerts: on. The watch buzzes for notifications and calls, except while it is on its charger: "
+        + "there it is silent by itself.";
   }
 
   /** The app's screen came up. */

@@ -155,9 +155,9 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   lv_label_set_text_static(labelBattery, "");
   lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, 0, 0);
 
-  // A crossed-out speaker left of the battery numbers says that the watch has been silenced from
-  // the phone ("Watch silent" in the phone's quick panel): it neither buzzes nor lights up until
-  // that is switched back.
+  // A crossed-out speaker left of the battery numbers says that the watch is silent: it has been
+  // silenced from the phone ("Watch silent" in the phone's quick panel), or it is on its charger.
+  // It neither buzzes nor lights up for anything until that is over.
   labelSilent = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelSilent, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, silentColor);
   lv_label_set_text_static(labelSilent, Symbols::volumMute);
@@ -356,9 +356,10 @@ void WatchFaceRemote::UpdateLevels() {
     batteryMoved = true;
   }
 
-  // The sign that the watch has been silenced sits right next to the numbers, so it moves when
-  // they get wider or narrower. It also shows while the phone is away: the watch stays silent then.
-  const bool silent = musicService.isSilencedByPhone();
+  // The sign that the watch is silent sits right next to the numbers, so it moves when they get
+  // wider or narrower. Silent means silenced from the phone (which holds while the phone is away
+  // too) or on the charger; see SystemTask::AlertsOn.
+  const bool silent = musicService.isSilencedByPhone() || watchCharging;
   const bool silentMoved = silent != shownSilent || (silent && batteryMoved);
   if (silentMoved) {
     shownSilent = silent;

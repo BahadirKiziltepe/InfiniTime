@@ -580,12 +580,13 @@ void SystemTask::HandleButtonAction(Controllers::ButtonActions action) {
 }
 
 // May the watch buzz and light up for what comes in? Not when its own alerts are switched off
-// (the list of settings, Notifications), and not while the phone has told it to stay silent (the
-// "Watch silent" button on the phone, for the hours the watch is not worn). What comes in is kept
-// either way and can be read on the notification screen.
+// (the list of settings, Notifications), not while the phone has told it to stay silent (the
+// "Watch silent" button on the phone), and not while it is on its charger: it is not on a wrist
+// then, and buzzing on a table only disturbs. What comes in is kept either way and can be read on
+// the notification screen.
 bool SystemTask::AlertsOn() {
   return settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On &&
-         !nimbleController.music().isSilencedByPhone();
+         !nimbleController.music().isSilencedByPhone() && !batteryController.IsPowerPresent();
 }
 
 // The watch's battery or the phone's has run down to 15 % or to 5 %. The watch buzzes for it, in

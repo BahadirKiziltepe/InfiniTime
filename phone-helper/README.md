@@ -65,6 +65,9 @@ watch shows a crossed-out speaker next to its battery numbers while it is silent
 stays silent until it is told otherwise, also across a lost connection. This is separate
 from the watch's own setting (list of settings, Notifications).
 
+The watch is also silent by itself for as long as it is on its charger, with the same
+sign on its screen. That needs nothing from the phone.
+
 The switch is on the app's screen and, as a button, in the phone's quick panel
 (`SilenceTile.java`): the app can ask Android to add it there, or it can be added with
 the panel's pencil. The button is lit while the watch is silent.
