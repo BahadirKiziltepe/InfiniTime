@@ -167,6 +167,7 @@ final class WatchLink {
   private boolean waitingMark;
   private int soundMode = UNKNOWN_BYTE;
   private boolean findRinging;
+  private boolean phoneCharging;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -919,6 +920,17 @@ final class WatchLink {
   }
 
   /**
+   * Tells the watch whether the phone is on a charger (watch build 18 and newer). The watch shows
+   * the phone's battery number in green then.
+   */
+  void setPhoneCharging(boolean charging) {
+    if (charging != phoneCharging) {
+      phoneCharging = charging;
+      putPhoneState();
+    }
+  }
+
+  /**
    * The button states, the levels and the marks travel together, in the channel the button states
    * had first. Each build of the watch reads as many of these bytes as it knows.
    */
@@ -926,7 +938,7 @@ final class WatchLink {
     int marks = (trackFlags & 0x01) | (waitingMark ? 0x02 : 0);
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
         (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks, (byte) soundMode,
-        (byte) (findRinging ? 0x01 : 0)});
+        (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0))});
     pump();
   }
 

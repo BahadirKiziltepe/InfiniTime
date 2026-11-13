@@ -56,7 +56,7 @@ namespace {
   // playing (bit 0: Spotify picked it, it is not in the playlist) and other marks for the main
   // screen (bit 1: Claude has a notification waiting on the phone). Since build 14 two more bytes
   // follow: the phone's sound mode (0 mute, 1 vibrate, 2 sound) and a byte of flags about the phone
-  // (bit 0: it is ringing to be found).
+  // (bit 0: it is ringing to be found; bit 1, since build 16: it is on a charger).
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
   // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
   // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is
@@ -492,8 +492,10 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
         phoneVolume = static_cast<uint8_t>(s[3]);
         phoneVolumeMax = static_cast<uint8_t>(s[4]);
         phoneBattery = static_cast<uint8_t>(s[5]);
-        // The phone's battery has just run down to 15 % or to 5 %: the wearer is told with a buzz
-        const auto warning = phoneBatteryWatch.Update(phoneBattery, false);
+        // The phone's battery has just run down to 15 % or to 5 %: the wearer is told with a buzz.
+        // Not while the phone is on a charger, which the ninth byte says.
+        const bool onCharger = notifSize >= 9 && (static_cast<uint8_t>(s[8]) & PhoneCharging) != 0;
+        const auto warning = phoneBatteryWatch.Update(phoneBattery, onCharger);
         if (warning == LowBatteryWatch::Warnings::Critical) {
           systemTask.PushMessage(Pinetime::System::Messages::OnBatteryCritical);
         } else if (warning == LowBatteryWatch::Warnings::Low) {

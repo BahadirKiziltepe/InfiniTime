@@ -106,6 +106,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   private boolean watchWasReady;
   /** The phone's battery in percent, as last announced by Android. */
   private int phoneBattery = UNKNOWN_LEVEL;
+  /** True while the phone is on a charger, by cable or without. */
+  private boolean phoneCharging;
 
   /** The Claude notifications on the phone right now, by Android's name for each. */
   private final java.util.Set<String> claudeWaiting = new java.util.HashSet<>();
@@ -490,6 +492,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     if (level >= 0 && scale > 0) {
       phoneBattery = Math.max(0, Math.min(100, Math.round(level * 100f / scale)));
     }
+    // Anything but 0 names the kind of charger the phone is on
+    phoneCharging = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
   }
 
   /** Tells the watch the phone's media volume, in the phone's own steps, and the phone's battery. */
@@ -509,6 +513,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       // Shown as unknown on the watch.
     }
     watch.setPhoneLevels(volume, steps, phoneBattery);
+    watch.setPhoneCharging(phoneCharging);
   }
 
   // ---------------------------------------------------------------- watch -> phone

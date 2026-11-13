@@ -182,6 +182,11 @@ namespace Pinetime {
         return (phoneFlags & FindRinging) != 0;
       }
 
+      // True while the phone is on a charger (bit 1 of the ninth byte, since phone app build 16)
+      bool isPhoneCharging() const {
+        return (phoneFlags & PhoneCharging) != 0;
+      }
+
       // The weather where the phone is, as the phone last sent it
       static constexpr uint8_t WeatherNone = 0;
       static constexpr uint8_t WeatherFresh = 1;
@@ -301,6 +306,7 @@ namespace Pinetime {
       static constexpr uint8_t TrackSmart = 0x01;
       static constexpr uint8_t WaitingMark = 0x02;
       static constexpr uint8_t FindRinging = 0x01;
+      static constexpr uint8_t PhoneCharging = 0x02;
 
       int OnPhoneMessage(struct os_mbuf* om);
       void Send(const uint8_t* data, uint16_t length);

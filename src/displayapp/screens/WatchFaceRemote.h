@@ -125,6 +125,8 @@ namespace Pinetime {
         /** What the top right corner shows. Starts at a value nothing uses, so the first update draws it. */
         uint8_t shownWatchBattery = 0xfe;
         uint8_t shownPhoneBattery = 0xfe;
+        bool shownWatchCharging = false;
+        bool shownPhoneCharging = false;
         uint8_t shownVolume = 0xfe;
         bool shownWaiting = false;
         uint32_t shownIconRevision = 0;

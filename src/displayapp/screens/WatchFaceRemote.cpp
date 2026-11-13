@@ -43,12 +43,12 @@ namespace {
 
   constexpr lv_coord_t textWidth = 232;
 
-  // Writes a battery level at the end of "out": as it is, or wrapped in the colour it is shown in
-  // when the battery is running low (yellow from 15 % down, red from 5 % down). The watch buzzes
-  // at those two marks; see LowBatteryWatch.
-  size_t AddLevel(char* out, size_t size, size_t used, uint8_t percent) {
+  // Writes a battery level at the end of "out": as it is, or wrapped in the colour it is shown in.
+  // Green while the device is on its charger. Otherwise yellow from 15 % down and red from 5 %
+  // down, when the battery is running low; the watch buzzes at those two marks, see LowBatteryWatch.
+  size_t AddLevel(char* out, size_t size, size_t used, uint8_t percent, bool charging) {
     using Watch = Pinetime::Controllers::LowBatteryWatch;
-    const char* color = percent <= Watch::Critical ? "ff4040" : percent <= Watch::Low ? "ffd000" : nullptr;
+    const char* color = charging ? "1ed760" : percent <= Watch::Critical ? "ff4040" : percent <= Watch::Low ? "ffd000" : nullptr;
     const int written = color != nullptr ? lv_snprintf(out + used, size - used, "#%s %d#", color, static_cast<int>(percent))
                                          : lv_snprintf(out + used, size - used, "%d", static_cast<int>(percent));
     return written > 0 && used + static_cast<size_t>(written) < size ? used + static_cast<size_t>(written) : used;
@@ -322,19 +322,25 @@ void WatchFaceRemote::UpdateLevels() {
   const bool connected = bleController.IsConnected();
   const uint8_t watchBattery = batteryController.PercentRemaining();
   const uint8_t phoneBattery = connected ? musicService.getPhoneBattery() : Music::StateUnknown;
+  // On the charger a number is green
+  const bool watchCharging = batteryController.IsPowerPresent();
+  const bool phoneCharging = connected && musicService.isPhoneCharging();
   bool batteryMoved = false;
-  if (watchBattery != shownWatchBattery || phoneBattery != shownPhoneBattery) {
+  if (watchBattery != shownWatchBattery || phoneBattery != shownPhoneBattery || watchCharging != shownWatchCharging ||
+      phoneCharging != shownPhoneCharging) {
     shownWatchBattery = watchBattery;
     shownPhoneBattery = phoneBattery;
+    shownWatchCharging = watchCharging;
+    shownPhoneCharging = phoneCharging;
     char levels[40];
     size_t used = 0;
     levels[0] = '\0';
     if (phoneBattery <= 100) {
-      used = AddLevel(levels, sizeof(levels), used, phoneBattery);
+      used = AddLevel(levels, sizeof(levels), used, phoneBattery, phoneCharging);
       levels[used++] = '|';
       levels[used] = '\0';
     }
-    AddLevel(levels, sizeof(levels), used, watchBattery);
+    AddLevel(levels, sizeof(levels), used, watchBattery, watchCharging);
     lv_label_set_text(labelBattery, levels);
     lv_obj_realign(labelBattery);
     batteryMoved = true;
