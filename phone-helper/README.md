@@ -23,6 +23,8 @@ The Android companion for the watch firmware in this repository. It is deliberat
 - rings at full volume when the watch's "find my phone" button is tapped, also on mute,
   with a sound picked in the app or else the phone's alarm sound
 - fetches the weather for where the phone is, for the watch's weather screen; see below
+- can silence the watch for the hours it is not worn, from the app's screen or from a
+  "Watch silent" button in the phone's quick panel; see below
 - installs watch builds from this repository's Releases page ("Update watch")
 - shows what Spotify offers to other apps and produces a report, used to wire up the
   watch's shuffle / repeat / add buttons
@@ -53,6 +55,19 @@ an encrypted connection, and nowhere else. The rounded position is kept in the a
 private storage and is never written to the log or the report. Android only says where
 the phone is while the app's screen is closed if "Allow all the time" was picked; without
 it the watch gets the weather for where the phone was when the screen was last open.
+
+## Silencing the watch from the phone
+
+A watch that lies on a table at night still buzzes for every notification. "Watch silent"
+stops that: the watch neither buzzes nor lights up for notifications, calls, the Claude
+mark or a low battery, and what comes in still collects on its notification screen. The
+watch shows a crossed-out speaker next to its battery numbers while it is silent, and it
+stays silent until it is told otherwise, also across a lost connection. This is separate
+from the watch's own setting (list of settings, Notifications).
+
+The switch is on the app's screen and, as a button, in the phone's quick panel
+(`SilenceTile.java`): the app can ask Android to add it there, or it can be added with
+the panel's pencil. The button is lit while the watch is silent.
 
 ## The foreground service
 
@@ -121,5 +136,6 @@ with JDK 17, Gradle 8.10+ and the Android SDK (platform 35, build-tools 35.0.0).
 | `PhoneFinder.java` | Rings so the phone can be found |
 | `Weather.java`, `WeatherReport.java` | Where the phone is, the weather there, and the answer to the watch |
 | `LinkService.java` | The foreground service Android 17 asks for |
+| `SilenceTile.java` | The quick panel button that silences the watch |
 | `MainActivity.java`, `Ui.java`, `Report.java` | The one screen, how it looks, and the report |
 | `WatchText.java`, `WatchTime.java`, `ActionPicker.java`, `PhoneFrames.java` | Small pure helpers |

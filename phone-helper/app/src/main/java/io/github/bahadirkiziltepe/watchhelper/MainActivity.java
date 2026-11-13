@@ -4,6 +4,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.StatusBarManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
@@ -11,6 +12,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Icon;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -94,6 +96,8 @@ public class MainActivity extends Activity {
   private Ui.Status soundStatus;
   private Ui.Status findStatus;
   private TextView ringButton;
+  private Ui.Status silentStatus;
+  private TextView silentButton;
 
   private Ui.Status notifyStatus;
   private Ui.Status callStatus;
@@ -223,6 +227,15 @@ public class MainActivity extends Activity {
     watchCard.addView(linkStatus.view);
     findButton = ui.button("Find watch", Ui.TONAL, v -> core.watch.findWatch());
     findRow = ui.add(watchCard, ui.flow(findButton), 14);
+    // Silence the watch for the hours it is not worn. The same switch can sit in the phone's quick panel.
+    silentStatus = ui.new Status();
+    ui.add(watchCard, silentStatus.view, 16);
+    silentButton = ui.button("Silence the watch", Ui.TONAL, v -> {
+      core.setWatchSilent(!core.watchSilent(), "you");
+      render();
+    });
+    ui.add(watchCard, ui.flow(silentButton,
+        ui.button("Add this to the quick panel", Ui.PLAIN, v -> addQuickPanelButton())), 14);
 
     // Whatever is still missing. Filled in by render().
     setupCaption = ui.caption("Finish setting up");
@@ -434,6 +447,8 @@ public class MainActivity extends Activity {
     setTopic(claudeStatus, "Claude", core.describeClaude());
     setTopic(soundStatus, "Phone sound", core.sound.describe());
     setTopic(findStatus, "Find my phone", core.finder.describe());
+    setTopic(silentStatus, "Watch alerts", core.describeSilence());
+    silentButton.setText(core.watchSilent() ? "Let the watch buzz again" : "Silence the watch");
     ringButton.setText(core.finder.ringing() ? "Stop ringing" : "Ring this phone");
     Ui.show(allowCallsButton, core.calls.missingPermissions().length > 0);
 
@@ -922,6 +937,27 @@ public class MainActivity extends Activity {
       // Shown as "a sound you picked".
     }
     return "";
+  }
+
+  /** Asks Android to put the "Watch silent" button among the buttons that come down from the top of the screen. */
+  private void addQuickPanelButton() {
+    final String byHand = "Swipe down from the top of the screen, tap the pencil and drag “Watch silent” into the panel.";
+    try {
+      StatusBarManager bar = getSystemService(StatusBarManager.class);
+      bar.requestAddTileService(new ComponentName(this, SilenceTile.class), "Watch silent",
+          Icon.createWithResource(this, R.drawable.ic_tile_watch_silent), getMainExecutor(), result -> {
+            if (result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED) {
+              toast("Added. Swipe down from the top of the screen to find it.");
+            } else if (result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED) {
+              toast("It is already in the quick panel.");
+            } else if (result != StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED) {
+              // Android could not show its question. The button can still be added by hand.
+              toast(byHand);
+            }
+          });
+    } catch (RuntimeException e) {
+      toast(byHand);
+    }
   }
 
   private void openDoNotDisturbSettings() {

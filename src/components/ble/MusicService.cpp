@@ -56,7 +56,8 @@ namespace {
   // playing (bit 0: Spotify picked it, it is not in the playlist) and other marks for the main
   // screen (bit 1: Claude has a notification waiting on the phone). Since build 14 two more bytes
   // follow: the phone's sound mode (0 mute, 1 vibrate, 2 sound) and a byte of flags about the phone
-  // (bit 0: it is ringing to be found; bit 1, since build 16: it is on a charger).
+  // (bit 0: it is ringing to be found; bit 1, since build 16: it is on a charger; bit 2, since
+  // build 17: the watch is to stay silent).
   constexpr ble_uuid128_t msButtonsCharUuid {CharUuid(0x0d, 0x00)};
   // Not part of stock InfiniTime either: notifications and the state of the phone's call, as sent by
   // the Watch Helper phone app. Every message fits one 20-byte packet, so a long notification is
@@ -505,6 +506,11 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
       trackFlags = notifSize >= 7 ? static_cast<uint8_t>(s[6]) : 0;
       phoneSoundMode = notifSize >= 8 ? static_cast<uint8_t>(s[7]) : StateUnknown;
       phoneFlags = notifSize >= 9 ? static_cast<uint8_t>(s[8]) : 0;
+      // Whether the watch is to stay silent is kept until the phone says otherwise, so a phone
+      // app that does not send this byte, or a lost connection, changes nothing
+      if (notifSize >= 9) {
+        silencedByPhone = (phoneFlags & WatchSilent) != 0;
+      }
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msPositionCharUuid.u) == 0) {
       trackProgress = (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3];
       trackProgressUpdateTime = xTaskGetTickCount();

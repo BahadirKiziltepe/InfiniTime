@@ -40,6 +40,7 @@ namespace {
   constexpr lv_coord_t markerOffsetY = 24;
   constexpr lv_coord_t waitingDotSize = 12;
   constexpr lv_coord_t waitingDotGap = 6;
+  constexpr lv_color_t silentColor = LV_COLOR_MAKE(0xff, 0x50, 0x50);
 
   constexpr lv_coord_t textWidth = 232;
 
@@ -153,6 +154,15 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   lv_label_set_recolor(labelBattery, true);
   lv_label_set_text_static(labelBattery, "");
   lv_obj_align(labelBattery, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, 0, 0);
+
+  // A crossed-out speaker left of the battery numbers says that the watch has been silenced from
+  // the phone ("Watch silent" in the phone's quick panel): it neither buzzes nor lights up until
+  // that is switched back.
+  labelSilent = lv_label_create(lv_scr_act(), nullptr);
+  lv_obj_set_style_local_text_color(labelSilent, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, silentColor);
+  lv_label_set_text_static(labelSilent, Symbols::volumMute);
+  lv_obj_set_hidden(labelSilent, true);
+  lv_obj_align(labelSilent, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
 
   // A mark left of the battery numbers says that Claude has a notification waiting on the phone.
   // Only that it is there: what it says never comes to the watch, and it is not among the
@@ -346,10 +356,21 @@ void WatchFaceRemote::UpdateLevels() {
     batteryMoved = true;
   }
 
-  // The mark sits right next to the numbers, so it moves when they get wider or narrower
+  // The sign that the watch has been silenced sits right next to the numbers, so it moves when
+  // they get wider or narrower. It also shows while the phone is away: the watch stays silent then.
+  const bool silent = musicService.isSilencedByPhone();
+  const bool silentMoved = silent != shownSilent || (silent && batteryMoved);
+  if (silentMoved) {
+    shownSilent = silent;
+    lv_obj_set_hidden(labelSilent, !silent);
+    lv_obj_align(labelSilent, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
+  }
+
+  // The mark comes next, left of that sign or, without it, left of the numbers
+  lv_obj_t* markNeighbour = silent ? labelSilent : labelBattery;
   const bool waiting = connected && musicService.hasWaitingMark();
   const uint32_t iconRevision = musicService.getMarkIconRevision();
-  if (waiting != shownWaiting || iconRevision != shownIconRevision || (waiting && batteryMoved)) {
+  if (waiting != shownWaiting || iconRevision != shownIconRevision || (waiting && (batteryMoved || silentMoved))) {
     if (iconRevision != shownIconRevision) {
       // A picture has arrived from the phone, or a newer one in place of the one before
       shownIconRevision = iconRevision;
@@ -366,8 +387,8 @@ void WatchFaceRemote::UpdateLevels() {
     const bool picture = musicService.hasMarkIcon();
     lv_obj_set_hidden(waitingIcon, !(waiting && picture));
     lv_obj_set_hidden(waitingDot, !(waiting && !picture));
-    lv_obj_align(waitingIcon, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
-    lv_obj_align(waitingDot, labelBattery, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
+    lv_obj_align(waitingIcon, markNeighbour, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
+    lv_obj_align(waitingDot, markNeighbour, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
   }
 
   // The number is the phone's own, so it also follows the phone's volume keys

@@ -224,7 +224,7 @@ void SystemTask::Work() {
           }
           break;
         case Messages::OnNewNotification:
-          if (settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On) {
+          if (AlertsOn()) {
             if (IsSleeping()) {
               GoToRunning();
             }
@@ -235,14 +235,14 @@ void SystemTask::Work() {
           // Something new is waiting on the phone that the watch only marks with a dot on its main
           // screen. It gets the buzz of a notification and the screen comes on, but no
           // notification is shown. Quiet when alerts are switched off, like everything else.
-          if (settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On) {
+          if (AlertsOn()) {
             GoToRunning();
             displayApp.PushMessage(Pinetime::Applications::Display::Messages::WaitingMark);
           }
           break;
         case Messages::OnNewCall:
           // The phone is ringing. Like notifications, calls stay quiet when alerts are switched off.
-          if (settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On) {
+          if (AlertsOn()) {
             GoToRunning();
             displayApp.PushMessage(Pinetime::Applications::Display::Messages::IncomingCall);
           }
@@ -579,12 +579,21 @@ void SystemTask::HandleButtonAction(Controllers::ButtonActions action) {
   fastWakeUpDone = false;
 }
 
+// May the watch buzz and light up for what comes in? Not when its own alerts are switched off
+// (the list of settings, Notifications), and not while the phone has told it to stay silent (the
+// "Watch silent" button on the phone, for the hours the watch is not worn). What comes in is kept
+// either way and can be read on the notification screen.
+bool SystemTask::AlertsOn() {
+  return settingsController.GetNotificationStatus() == Pinetime::Controllers::Settings::Notification::On &&
+         !nimbleController.music().isSilencedByPhone();
+}
+
 // The watch's battery or the phone's has run down to 15 % or to 5 %. The watch buzzes for it, in
 // short separate buzzes that do not feel like a notification, and the screen comes on: the number
 // of the battery in question is yellow from 15 % down and red from 5 % down. Quiet when alerts are
 // switched off, like everything else.
 void SystemTask::WarnLowBattery(bool critical) {
-  if (settingsController.GetNotificationStatus() != Pinetime::Controllers::Settings::Notification::On) {
+  if (!AlertsOn()) {
     return;
   }
   GoToRunning();

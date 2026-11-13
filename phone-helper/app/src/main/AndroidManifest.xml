@@ -110,6 +110,22 @@
             </intent-filter>
         </service>
 
+        <!-- A button for the phone's quick panel that silences the watch and lets it buzz again.
+             Only Android itself can talk to it. -->
+        <service
+            android:name=".SilenceTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_watch_silent"
+            android:label="@string/tile_watch_silent"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
         <!-- Keeps the app in the state Android 17 demands before it lets an app change the volume
              or the sound mode, or ring, while its screen is closed. It does nothing else. -->
         <service

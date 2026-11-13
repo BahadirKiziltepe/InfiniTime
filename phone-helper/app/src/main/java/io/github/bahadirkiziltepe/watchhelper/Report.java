@@ -46,6 +46,7 @@ final class Report {
     sb.append("Foreground service (Android 17 needs it for volume, sound mode and ringing): ")
         .append(LinkService.running() ? "running" : "not running")
         .append(LinkService.problem().isEmpty() ? "" : ", " + LinkService.problem()).append('\n');
+    sb.append("Watch silenced from the phone: ").append(core.watchSilent() ? "yes" : "no").append('\n');
     sb.append(core.sound.dump()).append('\n');
     sb.append(core.finder.dump()).append('\n');
     sb.append("Call history readable: ").append(core.history.allowed() ? "yes" : "no").append(", calls last shown to the watch: ")

@@ -168,6 +168,7 @@ final class WatchLink {
   private int soundMode = UNKNOWN_BYTE;
   private boolean findRinging;
   private boolean phoneCharging;
+  private boolean watchSilent;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -920,6 +921,17 @@ final class WatchLink {
   }
 
   /**
+   * Tells the watch to stay silent, or that it may buzz again (watch build 19 and newer). Silent,
+   * it neither buzzes nor lights up for anything, and it keeps to that across a lost connection.
+   */
+  void setWatchSilent(boolean silent) {
+    if (silent != watchSilent) {
+      watchSilent = silent;
+      putPhoneState();
+    }
+  }
+
+  /**
    * Tells the watch whether the phone is on a charger (watch build 18 and newer). The watch shows
    * the phone's battery number in green then.
    */
@@ -938,7 +950,7 @@ final class WatchLink {
     int marks = (trackFlags & 0x01) | (waitingMark ? 0x02 : 0);
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
         (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks, (byte) soundMode,
-        (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0))});
+        (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0) | (watchSilent ? 0x04 : 0))});
     pump();
   }
 

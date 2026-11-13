@@ -187,6 +187,14 @@ namespace Pinetime {
         return (phoneFlags & PhoneCharging) != 0;
       }
 
+      // True while the phone has told the watch to stay silent (bit 2 of the ninth byte, since
+      // phone app build 17): no buzzing and no lighting up for notifications, calls or anything
+      // else. It is switched on the phone, for the hours the watch is not worn. The watch keeps
+      // to what it was told last, also while the phone is out of reach.
+      bool isSilencedByPhone() const {
+        return silencedByPhone;
+      }
+
       // The weather where the phone is, as the phone last sent it
       static constexpr uint8_t WeatherNone = 0;
       static constexpr uint8_t WeatherFresh = 1;
@@ -307,6 +315,7 @@ namespace Pinetime {
       static constexpr uint8_t WaitingMark = 0x02;
       static constexpr uint8_t FindRinging = 0x01;
       static constexpr uint8_t PhoneCharging = 0x02;
+      static constexpr uint8_t WatchSilent = 0x04;
 
       int OnPhoneMessage(struct os_mbuf* om);
       void Send(const uint8_t* data, uint16_t length);
@@ -342,6 +351,7 @@ namespace Pinetime {
       uint8_t trackFlags {0};
       uint8_t phoneSoundMode {StateUnknown};
       uint8_t phoneFlags {0};
+      bool silencedByPhone {false};
       // Tells when the phone's battery has run low
       LowBatteryWatch phoneBatteryWatch;
 

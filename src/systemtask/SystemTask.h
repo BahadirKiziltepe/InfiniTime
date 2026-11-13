@@ -144,6 +144,7 @@ namespace Pinetime {
       void GoToSleep();
       void UpdateMotion();
       void WarnLowBattery(bool critical);
+      bool AlertsOn();
 
       // Tells when the watch's own battery has run low
       Pinetime::Controllers::LowBatteryWatch lowBattery;

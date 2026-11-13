@@ -75,6 +75,8 @@ namespace Pinetime {
         lv_obj_t* labelAmPm;
         lv_obj_t* labelBattery;
         lv_obj_t* notificationIcon;
+        // A crossed-out speaker: the phone has told the watch to stay silent
+        lv_obj_t* labelSilent;
         lv_obj_t* waitingDot;
         lv_obj_t* waitingIcon;
         lv_img_dsc_t waitingIconImage {};
@@ -129,6 +131,7 @@ namespace Pinetime {
         bool shownPhoneCharging = false;
         uint8_t shownVolume = 0xfe;
         bool shownWaiting = false;
+        bool shownSilent = false;
         uint32_t shownIconRevision = 0;
 
         /** Touch pad: a finger is down on it, and whether this press can still become a tap or a hold */

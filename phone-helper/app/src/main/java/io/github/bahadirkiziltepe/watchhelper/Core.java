@@ -108,6 +108,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   private int phoneBattery = UNKNOWN_LEVEL;
   /** True while the phone is on a charger, by cable or without. */
   private boolean phoneCharging;
+  /** True while the watch is told to neither buzz nor light up for anything. Kept across restarts. */
+  private boolean watchSilent;
 
   /** The Claude notifications on the phone right now, by Android's name for each. */
   private final java.util.Set<String> claudeWaiting = new java.util.HashSet<>();
@@ -122,6 +124,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   private byte[] claudeIcon;
   private int claudeIconColor;
   private static final String MARKS = "marks";
+  private static final String SWITCHES = "switches";
+  private static final String KEY_WATCH_SILENT = "watch_silent";
   private int claudeBuzzes;
   private boolean claudeTesting;
 
@@ -167,6 +171,12 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
       // The watch shows its dot until a notification brings the icon again.
     }
     log.add("app", "started, version " + version());
+    try {
+      watchSilent = app.getSharedPreferences(SWITCHES, Context.MODE_PRIVATE).getBoolean(KEY_WATCH_SILENT, false);
+    } catch (RuntimeException e) {
+      watchSilent = false;
+    }
+    watch.setWatchSilent(watchSilent);
 
     // Only the system can send these broadcasts, so receiving them from outside the app is safe.
     BroadcastReceiver bluetoothSwitch = new BroadcastReceiver() {
@@ -231,6 +241,38 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     watch.start();
     calls.start();
     sound.start();
+  }
+
+  /** True while the watch is told to stay silent. */
+  boolean watchSilent() {
+    return watchSilent;
+  }
+
+  /**
+   * Silences the watch, or lets it buzz again. Silent, the watch neither buzzes nor lights up for
+   * notifications, calls or anything else; they still collect on its notification screen. The
+   * watch keeps to it until it is told otherwise, also across a lost connection. {@code who} is
+   * for the log. Main thread.
+   */
+  void setWatchSilent(boolean silent, String who) {
+    if (silent == watchSilent) {
+      return;
+    }
+    watchSilent = silent;
+    app.getSharedPreferences(SWITCHES, Context.MODE_PRIVATE).edit().putBoolean(KEY_WATCH_SILENT, silent).apply();
+    watch.setWatchSilent(silent);
+    log.add("app", who + ": the watch is " + (silent ? "silent now" : "allowed to buzz again"));
+    SilenceTile.refresh(app);
+    changed();
+  }
+
+  /** One line for the screen. */
+  String describeSilence() {
+    if (watchSilent) {
+      return "Watch alerts: silent… The watch does not buzz or light up for anything until you switch this back. "
+          + "What comes in still collects on its notification screen.";
+    }
+    return "✓ Watch alerts: on. The watch buzzes for notifications and calls.";
   }
 
   /** The app's screen came up. */
