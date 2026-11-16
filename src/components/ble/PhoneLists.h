@@ -48,6 +48,8 @@ namespace Pinetime {
       static constexpr uint8_t ResultFailed = 1;
       // The list on the phone is no longer the one this page came from: ask for the page again
       static constexpr uint8_t ResultStale = 2;
+      // The phone is still at it (starting Spotify takes a while): the real answer follows
+      static constexpr uint8_t ResultWorking = 3;
 
       struct Row {
         std::array<char, RowSize + 1> text {};

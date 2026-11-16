@@ -49,6 +49,7 @@ final class Report {
     sb.append("Watch silenced from the phone: ").append(core.watchSilent() ? "yes" : "no").append('\n');
     sb.append(core.sound.dump()).append('\n');
     sb.append(core.finder.dump()).append('\n');
+    sb.append(core.earbuds.dump()).append('\n');
     sb.append("Call history readable: ").append(core.history.allowed() ? "yes" : "no").append(", calls last shown to the watch: ")
         .append(core.history.shown().size()).append(", people suggested for the watch: ")
         .append(core.suggestions.all().size()).append('\n');
@@ -56,6 +57,7 @@ final class Report {
     sb.append(core.weather.dump()).append('\n');
     sb.append("\n== Spotify ==\n");
     sb.append(core.spotify.dump());
+    sb.append(core.starter.dump()).append('\n');
 
     sb.append("\n== Playlists, queue and people ==\n");
     sb.append(core.account.dump()).append('\n');

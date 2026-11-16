@@ -103,6 +103,8 @@ namespace {
   constexpr uint8_t PhoneMarkAlert {0x06};
   constexpr uint8_t PhoneCall {0x10};
   constexpr uint8_t PhoneCallMore {0x11};
+  // How long the call has been going on: seconds, two bytes, low byte first
+  constexpr uint8_t PhoneCallTime {0x12};
   constexpr uint8_t PhoneListBegin {0x20};
   constexpr uint8_t PhoneListRow {0x21};
   constexpr uint8_t PhoneListRowMore {0x22};
@@ -279,6 +281,13 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
       const auto state = static_cast<Notifications::CallStates>(message[1]);
       const bool startsRinging = state == Notifications::CallStates::Ringing &&
                                  notificationManager.CallState() != Notifications::CallStates::Ringing;
+      if (state != Notifications::CallStates::Active) {
+        callTimed = false;
+      } else if (notificationManager.CallState() != Notifications::CallStates::Active) {
+        // Answered just now, as far as the watch can tell. The phone says so if it was earlier.
+        callActiveTick = xTaskGetTickCount();
+        callTimed = true;
+      }
       notificationManager.SetCall(state, payload + 1, payloadLength - 1);
       if (startsRinging) {
         systemTask.PushMessage(Pinetime::System::Messages::OnNewCall);
@@ -287,6 +296,13 @@ int Pinetime::Controllers::MusicService::OnPhoneMessage(struct os_mbuf* om) {
     }
     case PhoneCallMore:
       notificationManager.AppendCaller(payload, payloadLength);
+      break;
+    case PhoneCallTime:
+      if (length >= 3 && notificationManager.CallState() == Notifications::CallStates::Active) {
+        const auto seconds = static_cast<uint32_t>(message[1] | (message[2] << 8));
+        callActiveTick = xTaskGetTickCount() - static_cast<TickType_t>(seconds * configTICK_RATE_HZ);
+        callTimed = true;
+      }
       break;
     case PhoneListBegin: {
       if (length < PhoneListBeginSize || message[1] > PhoneLists::LastKind) {
@@ -511,6 +527,16 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
       if (notifSize >= 9) {
         silencedByPhone = (phoneFlags & WatchSilent) != 0;
       }
+      earbudsBattery = notifSize >= 10 ? static_cast<uint8_t>(s[9]) : StateUnknown;
+      callVolume = notifSize >= 11 ? static_cast<uint8_t>(s[10]) : StateUnknown;
+      // The earbuds' battery has just run down to 20 % or to 10 %: the same buzzes as for the
+      // phone's and the watch's. Nothing is known about them while they are put away.
+      const auto earbudsWarning = earbudsBatteryWatch.Update(earbudsBattery, false);
+      if (earbudsWarning == LowBatteryWatch::Warnings::Critical) {
+        systemTask.PushMessage(Pinetime::System::Messages::OnBatteryCritical);
+      } else if (earbudsWarning == LowBatteryWatch::Warnings::Low) {
+        systemTask.PushMessage(Pinetime::System::Messages::OnBatteryLow);
+      }
     } else if (ble_uuid_cmp(ctxt->chr->uuid, &msPositionCharUuid.u) == 0) {
       trackProgress = (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3];
       trackProgressUpdateTime = xTaskGetTickCount();
@@ -567,8 +593,15 @@ void Pinetime::Controllers::MusicService::OnDisconnect() {
   trackFlags = 0;
   phoneSoundMode = StateUnknown;
   phoneFlags = 0;
+  earbudsBattery = StateUnknown;
+  callVolume = StateUnknown;
+  callTimed = false;
   lists.Reset();
   notificationManager.SetCall(Pinetime::Controllers::NotificationManager::CallStates::Idle, nullptr, 0);
+}
+
+uint32_t Pinetime::Controllers::MusicService::getCallSeconds() const {
+  return static_cast<uint32_t>(xTaskGetTickCount() - callActiveTick) / configTICK_RATE_HZ;
 }
 
 void Pinetime::Controllers::MusicService::event(char event) {

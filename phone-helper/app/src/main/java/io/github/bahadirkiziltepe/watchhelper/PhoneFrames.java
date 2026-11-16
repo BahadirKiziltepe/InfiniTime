@@ -40,6 +40,7 @@ final class PhoneFrames {
   private static final int MARK_ALERT = 0x06;
   private static final int CALL = 0x10;
   private static final int CALL_MORE = 0x11;
+  private static final int CALL_TIME = 0x12;
 
   // Lists the watch asks for, one page at a time (see src/components/ble/PhoneLists.h).
   static final int LIST_QUEUE = 1;
@@ -75,6 +76,8 @@ final class PhoneFrames {
   static final int RESULT_FAILED = 1;
   /** The list is no longer the one the watch's page came from. The watch asks for the page again. */
   static final int RESULT_STALE = 2;
+  /** Not the answer yet: the phone is still at it, and the watch keeps waiting (watch build 21 and newer). */
+  static final int RESULT_WORKING = 3;
 
   private static final int LIST_BEGIN = 0x20;
   private static final int LIST_ROW = 0x21;
@@ -254,6 +257,17 @@ final class PhoneFrames {
     System.arraycopy(name, 0, head, 2, first);
     out.add(head);
     addPieces(out, CALL_MORE, name, first);
+    return out;
+  }
+
+  /**
+   * How long the call that is under way has been going on, in seconds (watch build 21 and newer).
+   * Sent after the call itself. The watch counts on from there by its own clock.
+   */
+  static List<byte[]> callTime(long seconds) {
+    int value = (int) Math.max(0, Math.min(0xffff, seconds));
+    List<byte[]> out = new ArrayList<>();
+    out.add(new byte[] {(byte) CALL_TIME, (byte) (value & 0xff), (byte) (value >> 8)});
     return out;
   }
 

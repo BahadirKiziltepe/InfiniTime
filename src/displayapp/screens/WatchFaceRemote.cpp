@@ -19,7 +19,9 @@ using namespace Pinetime::Applications::Screens;
 namespace {
   // Layout of the 240x240 screen.
   //
-  //   y   0.. 46  top bar: time (left); phone and watch battery (right) with the volume under them
+  //   y   0.. 46  top bar: time (left); phone and watch battery (right) with the volume under them.
+  //               While earbuds are connected to the phone and share their battery, that number
+  //               sits between the two and the volume moves one line down (to y 44..66).
   //   y  66.. 90  track
   //   y  96..120  artist
   //   y 134..154  what a tap will do (play or pause), and the position in the track
@@ -38,6 +40,11 @@ namespace {
 
   // Second line of the top bar, under the battery numbers
   constexpr lv_coord_t markerOffsetY = 24;
+  // With the earbuds' battery there are three lines, a little closer together so that the third
+  // one stays clear of the song's title
+  constexpr lv_coord_t earbudsOffsetY = 22;
+  constexpr lv_coord_t markerLowOffsetY = 44;
+  constexpr lv_coord_t notificationIconOffsetX = -30;
   constexpr lv_coord_t waitingDotSize = 12;
   constexpr lv_coord_t waitingDotGap = 6;
   constexpr lv_color_t silentColor = LV_COLOR_MAKE(0xff, 0x50, 0x50);
@@ -45,11 +52,11 @@ namespace {
   constexpr lv_coord_t textWidth = 232;
 
   // Writes a battery level at the end of "out": as it is, or wrapped in the colour it is shown in.
-  // Green while the device is on its charger. Otherwise yellow from 15 % down and red from 5 %
-  // down, when the battery is running low; the watch buzzes at those two marks, see LowBatteryWatch.
-  size_t AddLevel(char* out, size_t size, size_t used, uint8_t percent, bool charging) {
-    using Watch = Pinetime::Controllers::LowBatteryWatch;
-    const char* color = charging ? "1ed760" : percent <= Watch::Critical ? "ff4040" : percent <= Watch::Low ? "ffd000" : nullptr;
+  // Green while the device is on its charger. Otherwise yellow from the low mark down and red from
+  // the critical mark down, when the battery is running low: 15 % and 5 % for the watch and the
+  // phone, 20 % and 10 % for earbuds. The watch buzzes at those marks, see LowBatteryWatch.
+  size_t AddLevel(char* out, size_t size, size_t used, uint8_t percent, bool charging, uint8_t low, uint8_t critical) {
+    const char* color = charging ? "1ed760" : percent <= critical ? "ff4040" : percent <= low ? "ffd000" : nullptr;
     const int written = color != nullptr ? lv_snprintf(out + used, size - used, "#%s %d#", color, static_cast<int>(percent))
                                          : lv_snprintf(out + used, size - used, "%d", static_cast<int>(percent));
     return written > 0 && used + static_cast<size_t>(written) < size ? used + static_cast<size_t>(written) : used;
@@ -184,12 +191,17 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   notificationIcon = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(notificationIcon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_LIME);
   lv_label_set_text_static(notificationIcon, NotificationIcon::GetIcon(false));
-  lv_obj_align(notificationIcon, nullptr, LV_ALIGN_IN_TOP_RIGHT, -30, markerOffsetY);
+  lv_obj_align(notificationIcon, nullptr, LV_ALIGN_IN_TOP_RIGHT, notificationIconOffsetX, markerOffsetY);
 
   labelVolume = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelVolume, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::orange);
   lv_label_set_text_static(labelVolume, "");
   lv_obj_align(labelVolume, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, markerOffsetY);
+
+  labelEarbuds = lv_label_create(lv_scr_act(), nullptr);
+  lv_label_set_recolor(labelEarbuds, true);
+  lv_label_set_text_static(labelEarbuds, "");
+  lv_obj_align(labelEarbuds, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, earbudsOffsetY);
 
   // Top bar, left: the time, with AM/PM next to it in 12-hour mode
   labelTime = lv_label_create(lv_scr_act(), nullptr);
@@ -327,6 +339,7 @@ void WatchFaceRemote::Refresh() {
 
 void WatchFaceRemote::UpdateLevels() {
   using Music = Controllers::MusicService;
+  using Battery = Controllers::LowBatteryWatch;
 
   // What the phone said last is only worth showing while the phone is still there
   const bool connected = bleController.IsConnected();
@@ -346,11 +359,11 @@ void WatchFaceRemote::UpdateLevels() {
     size_t used = 0;
     levels[0] = '\0';
     if (phoneBattery <= 100) {
-      used = AddLevel(levels, sizeof(levels), used, phoneBattery, phoneCharging);
+      used = AddLevel(levels, sizeof(levels), used, phoneBattery, phoneCharging, Battery::Low, Battery::Critical);
       levels[used++] = '|';
       levels[used] = '\0';
     }
-    AddLevel(levels, sizeof(levels), used, watchBattery, watchCharging);
+    AddLevel(levels, sizeof(levels), used, watchBattery, watchCharging, Battery::Low, Battery::Critical);
     lv_label_set_text(labelBattery, levels);
     lv_obj_realign(labelBattery);
     batteryMoved = true;
@@ -390,6 +403,30 @@ void WatchFaceRemote::UpdateLevels() {
     lv_obj_set_hidden(waitingDot, !(waiting && !picture));
     lv_obj_align(waitingIcon, markNeighbour, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
     lv_obj_align(waitingDot, markNeighbour, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
+  }
+
+  // The earbuds' battery, for as long as they are connected to the phone and share it: the number
+  // comes when they are taken out and goes when they are put away. The volume and the marker for
+  // new notifications make room for it by moving one line down.
+  const uint8_t earbuds = connected ? musicService.getEarbudsBattery() : Music::StateUnknown;
+  if (earbuds != shownEarbuds) {
+    const bool had = shownEarbuds <= 100;
+    const bool has = earbuds <= 100;
+    shownEarbuds = earbuds;
+    if (has) {
+      char level[24];
+      level[0] = '\0';
+      AddLevel(level, sizeof(level), 0, earbuds, false, Battery::EarbudsLow, Battery::EarbudsCritical);
+      lv_label_set_text(labelEarbuds, level);
+    } else {
+      lv_label_set_text_static(labelEarbuds, "");
+    }
+    lv_obj_realign(labelEarbuds);
+    if (has != had) {
+      const lv_coord_t markerY = has ? markerLowOffsetY : markerOffsetY;
+      lv_obj_align(labelVolume, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, markerY);
+      lv_obj_align(notificationIcon, nullptr, LV_ALIGN_IN_TOP_RIGHT, notificationIconOffsetX, markerY);
+    }
   }
 
   // The number is the phone's own, so it also follows the phone's volume keys

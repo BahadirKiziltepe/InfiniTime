@@ -8,9 +8,14 @@ The Android companion for the watch firmware in this repository. It is deliberat
 - passes notifications from Google Messages, WhatsApp and Discord on to the watch, and takes
   them off the watch again when they go away on the phone; holding a notification on the
   watch clears it on the phone
+- starts Spotify on the phone when play is pressed on the watch and Spotify is not running;
+  see below
 - tells the watch when the phone rings or is in a call, and answers or declines a ringing
   call when the watch asks for it (calls made through apps such as WhatsApp need nothing
-  extra; ordinary phone calls need the Phone, Call logs and Contacts permissions)
+  extra; ordinary phone calls need the Phone, Call logs and Contacts permissions). During a
+  call the watch also gets how long it has been going on and the call's volume
+- passes on the battery of the earbuds or headphones that are connected to the phone, for
+  as long as they share it; see below
 - shows the play queue, the playlists and their songs on the watch, plays a song in its
   playlist or adds it to the queue from there, and marks the songs Spotify picked itself
   (Smart Shuffle). This part needs Spotify's web service; see below
@@ -34,6 +39,34 @@ Bluetooth and nowhere else. The app's log and report only note that something wa
 Of the people chosen for the watch only the names are sent to it; the numbers stay on the phone.
 The same goes for the call history: the watch gets a name (or the number, if the phone has no
 name for it), the kind of call and the time.
+
+## Starting Spotify from the watch
+
+A Spotify that is not running cannot be told anything, neither through Android nor through
+Spotify's web service. So when the watch wants music and Spotify is not there,
+`SpotifyStarter` brings it up first, one way after the other:
+
+1. A play button like a headset's. Android hands it to the app that played last and starts
+   that app if need be. It is only pressed if that app is Spotify; otherwise it would wake
+   a video somewhere else.
+2. If Spotify has not turned up after three seconds: opening Spotify, the way a tap on its
+   icon does. Android lets an app in the background do that only with the permission it
+   calls "Appear on top" (`SYSTEM_ALERT_WINDOW`), which the app asks for under "Finish
+   setting up". The app never draws anything on top of anything.
+3. Once Spotify is there: play, on its own player or through the web service, a few times
+   over if it does not listen at once.
+
+The watch says "Starting Spotify..." meanwhile. After fifteen seconds without success it
+says so, and the report names the step that failed.
+
+## Earbuds
+
+Earbuds tell the phone how full they are while they are connected to it, most of them in
+steps of ten. Android keeps that one number and announces changes; the app passes it on, and
+the watch shows it under its own battery, yellow from 20 % down and red from 10 %, with the
+same buzzes as for the phone's and the watch's battery. Earbuds that are put away say
+nothing, and nothing can ask them: the number goes when they disconnect. Neither the name
+nor the address of a headset is written to the log or the report.
 
 ## Weather
 
@@ -130,6 +163,8 @@ with JDK 17, Gradle 8.10+ and the Android SDK (platform 35, build-tools 35.0.0).
 | `MediaListenerService.java` | Holds notification access: Spotify's player, the notifications and the calls all come in through it |
 | `NotificationRelay.java` | Decides which notifications go to the watch and when they are taken back |
 | `CallWatcher.java` | Follows the phone's call, and answers or declines for the watch |
+| `SpotifyStarter.java` | Starts Spotify on the phone when the watch wants music and it is not running |
+| `Earbuds.java` | The battery of the earbuds that are connected to the phone |
 | `SpotifyAccount.java`, `Http.java` | The login to Spotify's web service, and one web request |
 | `MusicLibrary.java` | Playlists, songs and queue from Spotify's web service; play and add to queue |
 | `WatchLists.java` | Answers the watch's requests for pages of its lists |

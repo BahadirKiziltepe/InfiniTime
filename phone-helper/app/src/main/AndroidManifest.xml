@@ -51,6 +51,10 @@
     <!-- Since Android 17 an app may only change a volume or the sound mode, or make a sound, in
          the background while it runs a foreground service. See LinkService. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Lets play on the watch start Spotify when it is not running: Android only lets an app
+         open another one from the background if the user has allowed it to "appear on top".
+         The app never draws anything on top of anything. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <uses-feature

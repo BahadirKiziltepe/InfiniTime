@@ -167,6 +167,27 @@ namespace Pinetime {
         return phoneBattery;
       }
 
+      // The battery of the earbuds or headphones that are connected to the phone, in percent, as
+      // they share it with the phone (the tenth byte, since phone app build 19). StateUnknown
+      // while none are connected and while they do not say.
+      uint8_t getEarbudsBattery() const {
+        return earbudsBattery;
+      }
+
+      // The volume of the call that is under way, in the phone's own steps (the eleventh byte,
+      // since phone app build 19). StateUnknown while there is no call.
+      uint8_t getCallVolume() const {
+        return callVolume;
+      }
+
+      // How long the call has been going on, in seconds: counted from the moment the watch heard
+      // that it was answered, and set right by the phone when it knows better. Only worth showing
+      // while isCallTimed().
+      bool isCallTimed() const {
+        return callTimed;
+      }
+      uint32_t getCallSeconds() const;
+
       // The phone's sound mode as the phone itself reports it (the eighth byte of the buttons
       // characteristic): sound, vibrate or mute. StateUnknown until the phone app has sent it.
       static constexpr uint8_t SoundMute = 0;
@@ -352,8 +373,15 @@ namespace Pinetime {
       uint8_t phoneSoundMode {StateUnknown};
       uint8_t phoneFlags {0};
       bool silencedByPhone {false};
-      // Tells when the phone's battery has run low
+      uint8_t earbudsBattery {StateUnknown};
+      uint8_t callVolume {StateUnknown};
+      // Tells when the phone's battery has run low, and when the earbuds' has
       LowBatteryWatch phoneBatteryWatch;
+      LowBatteryWatch earbudsBatteryWatch {LowBatteryWatch::EarbudsLow, LowBatteryWatch::EarbudsCritical};
+
+      // When the call that is under way was answered, as a tick count
+      std::atomic<TickType_t> callActiveTick {0};
+      std::atomic<bool> callTimed {false};
 
       // The weather as it is shown, and the one that is arriving: the hours come first, then the rest
       Weather weather {};

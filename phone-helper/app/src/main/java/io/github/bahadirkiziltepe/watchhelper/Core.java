@@ -91,6 +91,8 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
   final SoundMode sound;
   final PhoneFinder finder;
   final Weather weather;
+  final SpotifyStarter starter;
+  final Earbuds earbuds;
   /** For reading the call log when the screen opens, away from the main thread. */
   private final java.util.concurrent.ExecutorService background =
       java.util.concurrent.Executors.newSingleThreadExecutor(work -> {
@@ -138,15 +140,71 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     this.watch = new WatchLink(app, main, log, this);
     this.updater = new Updater(app, main, log, watch, buildNumber(), this);
     this.notifications = new NotificationRelay(main, log, watch);
-    this.calls = new CallWatcher(app, main, log, watch, this::changed);
+    this.calls = new CallWatcher(app, main, log, watch, this::onCallChanged);
     this.contacts = new ContactStore(app);
     this.account = new SpotifyAccount(app, main, log, this::onAccountChanged);
-    this.library = new MusicLibrary(account, log, () -> main.post(spotify::wakeUp));
+    this.starter = new SpotifyStarter(app, main, log, new SpotifyStarter.Host() {
+      @Override
+      public boolean playerOpen() {
+        return spotify.attached();
+      }
+
+      @Override
+      public boolean playing() {
+        return spotify.attached() && spotify.isPlaying();
+      }
+
+      @Override
+      public void pressPlay() {
+        spotify.pressPlay();
+      }
+
+      @Override
+      public void headsetPlay() {
+        LinkService.ensure(Core.this.app);
+        spotify.headsetPlay();
+      }
+
+      @Override
+      public void playButtonToSpotify() {
+        spotify.playButtonToSpotify();
+      }
+
+      @Override
+      public String headsetTarget() {
+        return spotify.headsetTarget();
+      }
+
+      @Override
+      public void playOverWeb() {
+        if (lists != null) {
+          lists.resumeOnPhone();
+        }
+      }
+
+      @Override
+      public void changed() {
+        onSpotifyChanged();
+      }
+    });
+    // The lists reach Spotify from a thread of their own; starting Spotify belongs on the main one.
+    this.library = new MusicLibrary(account, log, new MusicLibrary.Waker() {
+      @Override
+      public void wake() {
+        main.post(() -> starter.begin("a list on the watch", false));
+      }
+
+      @Override
+      public void awake() {
+        main.post(starter::deviceSeen);
+      }
+    });
     this.history = new CallHistory(app, calls);
     this.suggestions = new SuggestionStore(app);
     this.sound = new SoundMode(app, main, log, watch, this::changed);
     this.finder = new PhoneFinder(app, main, log, watch, sound, this::changed);
     this.weather = new Weather(app, main, log, watch, this::changed);
+    this.earbuds = new Earbuds(app, main, log, watch, this::changed);
     this.lists = new WatchLists(main, log, watch, account, library, contacts, calls, spotify, history);
     PowerManager.WakeLock lock = null;
     try {
@@ -189,6 +247,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         } else if (state == BluetoothAdapter.STATE_OFF) {
           log.add("watch", "Bluetooth was turned off");
           watch.onBluetoothOff();
+          earbuds.onBluetoothOff();
         }
       }
     };
@@ -241,6 +300,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     watch.start();
     calls.start();
     sound.start();
+    earbuds.start();
   }
 
   /** True while the watch is told to stay silent. */
@@ -509,12 +569,27 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
           spotify.currentPositionMs(), spotify.speed(), spotify.durationMs());
       watch.setButtonStates(spotify.shuffleState(), spotify.repeatState(), spotify.savedState());
     } else {
-      watch.setNowPlaying("", "", "", false, -1, 1f, 0);
+      // Nothing is playing. While Spotify is being started for the watch, the watch says so there.
+      String[] note = starter == null ? null : starter.watchText();
+      watch.setNowPlaying(note == null ? "" : note[0], note == null ? "" : note[1], "", false, -1, 1f, 0);
       watch.setButtonStates(ButtonStates.UNKNOWN, ButtonStates.UNKNOWN, ButtonStates.UNKNOWN);
     }
     if (lists != null) {
       lists.onPlayerChanged();
     }
+    changed();
+  }
+
+  /** Play was pressed on the watch and Spotify's player is not there. */
+  @Override
+  public void onSpotifyWanted(String who) {
+    starter.begin(who, true);
+    changed();
+  }
+
+  /** A call began, ended or changed. Its volume goes to the watch along with the other levels. */
+  private void onCallChanged() {
+    sendLevels();
     changed();
   }
 
@@ -557,6 +632,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
     }
     watch.setPhoneLevels(volume, steps, phoneBattery);
     watch.setPhoneCharging(phoneCharging);
+    watch.setCallVolume(calls == null ? UNKNOWN_LEVEL : calls.callVolume());
   }
 
   // ---------------------------------------------------------------- watch -> phone

@@ -277,12 +277,13 @@ void DisplayApp::Refresh() {
         motorController.RunForDuration(markBuzzLeft > 0 ? 250 : 200);
       }
 
-      // A battery that has run low gets short buzzes with a pause between them, so that it does
-      // not feel like a notification: two at 15 %, three at 5 %.
-      if (batteryBuzzLeft > 0 && (xTaskGetTickCount() - batteryBuzzTick) >= pdMS_TO_TICKS(450)) {
+      // A battery that has run low gets short buzzes with pauses between them, so that it cannot
+      // be taken for a notification, which is 0.6 s in one piece. The pauses are as long as the
+      // buzzes; how many and how long is set where the message arrives, below.
+      if (batteryBuzzLeft > 0 && (xTaskGetTickCount() - batteryBuzzTick) >= batteryBuzzPeriod) {
         batteryBuzzTick = xTaskGetTickCount();
         batteryBuzzLeft--;
-        motorController.RunForDuration(200);
+        motorController.RunForDuration(batteryBuzzMs);
       }
 
       // A call keeps the screen on, whichever screen is showing, so that it can be ended from the
@@ -416,13 +417,20 @@ void DisplayApp::Refresh() {
         lv_disp_trig_activity(nullptr);
         break;
       case Messages::BatteryLow:
-      case Messages::BatteryCritical:
-        // The watch's battery or the phone's has run down to 15 % or to 5 %. Two or three short
-        // buzzes; the main screen shows the number in yellow or red.
-        batteryBuzzLeft = msg == Messages::BatteryCritical ? 3 : 2;
-        batteryBuzzTick = xTaskGetTickCount() - pdMS_TO_TICKS(450);
+      case Messages::BatteryCritical: {
+        // A battery has run down to its first mark or its second: the watch's or the phone's
+        // (15 % and 5 %), or the earbuds' (20 % and 10 %). The main screen shows that number in
+        // yellow or red. The buzzes are the same for all three:
+        //   yellow, the first mark: 3 short ones in 0.9 s, one and a half times a notification
+        //   red, the second mark:   5 short ones in 1.2 s, twice a notification
+        const bool critical = msg == Messages::BatteryCritical;
+        batteryBuzzLeft = critical ? 5 : 3;
+        batteryBuzzMs = critical ? 133 : 180;
+        batteryBuzzPeriod = pdMS_TO_TICKS(critical ? 267 : 360);
+        batteryBuzzTick = xTaskGetTickCount() - batteryBuzzPeriod;
         lv_disp_trig_activity(nullptr);
         break;
+      }
       case Messages::ShakeToSleep:
         // Shaking the watch again turns the screen off, but only on the main screen. A notification
         // or a settings page should not vanish because the arm moved.
@@ -710,6 +718,8 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
                                                       notificationManager,
                                                       motorController,
                                                       systemTask->nimble().music(),
+                                                      dateTimeController,
+                                                      settingsController,
                                                       *systemTask,
                                                       ringOnCallScreen);
       ringOnCallScreen = false;

@@ -169,6 +169,8 @@ final class WatchLink {
   private boolean findRinging;
   private boolean phoneCharging;
   private boolean watchSilent;
+  private int earbudsBattery = UNKNOWN_BYTE;
+  private int callVolume = UNKNOWN_BYTE;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -943,6 +945,31 @@ final class WatchLink {
   }
 
   /**
+   * Tells the watch the battery of the earbuds that are connected to the phone, in percent, or
+   * 0xff for none (watch build 21 and newer). The watch shows the number under its own battery
+   * for as long as there is one.
+   */
+  void setEarbuds(int percent) {
+    int value = percent < 0 || percent > 100 ? UNKNOWN_BYTE : percent;
+    if (value != earbudsBattery) {
+      earbudsBattery = value;
+      putPhoneState();
+    }
+  }
+
+  /**
+   * Tells the watch the volume of the call that is under way, in the phone's own steps, or 0xff
+   * while there is no call (watch build 21 and newer). The watch shows it on its call screen.
+   */
+  void setCallVolume(int volume) {
+    int value = volume < 0 || volume > 254 ? UNKNOWN_BYTE : volume;
+    if (value != callVolume) {
+      callVolume = value;
+      putPhoneState();
+    }
+  }
+
+  /**
    * The button states, the levels and the marks travel together, in the channel the button states
    * had first. Each build of the watch reads as many of these bytes as it knows.
    */
@@ -950,7 +977,8 @@ final class WatchLink {
     int marks = (trackFlags & 0x01) | (waitingMark ? 0x02 : 0);
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
         (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks, (byte) soundMode,
-        (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0) | (watchSilent ? 0x04 : 0))});
+        (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0) | (watchSilent ? 0x04 : 0)),
+        (byte) earbudsBattery, (byte) callVolume});
     pump();
   }
 

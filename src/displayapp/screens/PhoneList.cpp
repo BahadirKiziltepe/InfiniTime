@@ -295,7 +295,12 @@ void PhoneList::TakeNews(TickType_t now) {
   Lists::Result result;
   if (lists.TakeResult(result) && result.kind == kind) {
     acting = false;
-    if (result.code == Lists::ResultStale) {
+    if (result.code == Lists::ResultWorking) {
+      // Not the answer yet: the phone says what it is busy with, and the wait starts over
+      acting = true;
+      actingTick = now;
+      ShowToast(result.text[0] != '\0' ? result.text.data() : "One moment", musicColor, now);
+    } else if (result.code == Lists::ResultStale) {
       StopConfirming();
       ShowToast("List changed", Colors::orange, now);
       Ask(wantedOffset);

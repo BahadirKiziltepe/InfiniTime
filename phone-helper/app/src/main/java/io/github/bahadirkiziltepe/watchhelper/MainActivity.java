@@ -97,6 +97,8 @@ public class MainActivity extends Activity {
   private Ui.Status findStatus;
   private TextView ringButton;
   private Ui.Status silentStatus;
+  private Ui.Status earbudsStatus;
+  private Ui.Status starterStatus;
   private TextView silentButton;
 
   private Ui.Status notifyStatus;
@@ -236,6 +238,9 @@ public class MainActivity extends Activity {
     });
     ui.add(watchCard, ui.flow(silentButton,
         ui.button("Add this to the quick panel", Ui.PLAIN, v -> addQuickPanelButton())), 14);
+    // The earbuds' battery, which the watch shows under its own while they are connected
+    earbudsStatus = ui.new Status();
+    ui.add(watchCard, earbudsStatus.view, 16);
 
     // Whatever is still missing. Filled in by render().
     setupCaption = ui.caption("Finish setting up");
@@ -254,6 +259,9 @@ public class MainActivity extends Activity {
     chipRepeat = ui.chip("");
     chipSaved = ui.chip("");
     songChips = ui.add(song, ui.flow(chipShuffle, chipRepeat, chipSaved), 12);
+    // Whether play on the watch can start a Spotify that is not running
+    starterStatus = ui.new Status();
+    ui.add(song, starterStatus.view, 16);
 
     // Spotify's web service
     root.addView(ui.caption("Playlists and queue on the watch"));
@@ -436,7 +444,7 @@ public class MainActivity extends Activity {
     renderWatch(bluetooth);
     // Android gives this along with notification access. Asked for only if it did not.
     boolean doNotDisturb = !access || core.sound.mayChangeDoNotDisturb();
-    renderSetup(access, bluetooth, background, core.gadgetbridgeInstalled(), doNotDisturb);
+    renderSetup(access, bluetooth, background, core.gadgetbridgeInstalled(), doNotDisturb, core.starter.mayOpen());
     renderSong();
     renderAccount();
     renderPeople();
@@ -448,6 +456,8 @@ public class MainActivity extends Activity {
     setTopic(soundStatus, "Phone sound", core.sound.describe());
     setTopic(findStatus, "Find my phone", core.finder.describe());
     setTopic(silentStatus, "Watch alerts", core.describeSilence());
+    setTopic(earbudsStatus, "Earbuds", core.earbuds.describe());
+    setTopic(starterStatus, "Starting Spotify", core.starter.describe());
     silentButton.setText(core.watchSilent() ? "Let the watch buzz again" : "Silence the watch");
     ringButton.setText(core.finder.ringing() ? "Stop ringing" : "Ring this phone");
     Ui.show(allowCallsButton, core.calls.missingPermissions().length > 0);
@@ -472,9 +482,9 @@ public class MainActivity extends Activity {
 
   /** The setup card lists only what is still missing, and goes away when nothing is. */
   private void renderSetup(boolean access, boolean bluetooth, boolean background, boolean gadgetbridge,
-      boolean doNotDisturb) {
+      boolean doNotDisturb, boolean openApps) {
     int missing = (access ? 0 : 1) | (bluetooth ? 0 : 2) | (background ? 0 : 4) | (gadgetbridge ? 8 : 0)
-        | (doNotDisturb ? 0 : 16);
+        | (doNotDisturb ? 0 : 16) | (openApps ? 0 : 32);
     if (missing == setupShown) {
       return;
     }
@@ -499,6 +509,15 @@ public class MainActivity extends Activity {
     if (!doNotDisturb) {
       addSetup("Do Not Disturb access", "Lets the sound button on the watch put the phone on mute and back. Android "
           + "ties that to Do Not Disturb.", ui.button("Open settings", Ui.FILLED, v -> openDoNotDisturbSettings()));
+    }
+    if (!openApps) {
+      addSetup("Start Spotify from the watch", "Lets play on the watch start Spotify when it is not running, so you "
+          + "do not have to take the phone out. Android only lets an app open another one from the background with "
+          + "the permission it calls “Appear on top”: switch it on for Watch Helper. Nothing is ever drawn on top of "
+          + "anything. If the switch is greyed out, tap App info, then the three dots at the top right, then “Allow "
+          + "restricted settings”, and come back.",
+          ui.button("Open settings", Ui.FILLED, v -> openOverlaySettings()),
+          ui.button("App info", Ui.TONAL, v -> openAppInfo()));
     }
     if (gadgetbridge) {
       addSetup("Gadgetbridge is still installed", "Disconnect the watch in Gadgetbridge, or uninstall it. Otherwise "
@@ -526,8 +545,9 @@ public class MainActivity extends Activity {
       songTitle.setText("Waiting for notification access");
       songArtist.setText("");
     } else if (!playing) {
-      songTitle.setText("Nothing playing");
-      songArtist.setText("Open Spotify and start a song.");
+      songTitle.setText(core.starter.busy() ? "Starting Spotify…" : "Nothing playing");
+      songArtist.setText(core.starter.mayOpen() ? "Play on the watch starts Spotify."
+          : "Open Spotify and start a song.");
     } else {
       songTitle.setText(spotify.title().isEmpty() ? "(no title)" : spotify.title());
       String artist = spotify.artist();
@@ -965,6 +985,14 @@ public class MainActivity extends Activity {
       startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
     } catch (RuntimeException e) {
       toast("Open Settings, search for “Do Not Disturb access” and switch on Watch Helper.");
+    }
+  }
+
+  private void openOverlaySettings() {
+    try {
+      startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+    } catch (RuntimeException e) {
+      toast("Open Settings, then Apps, Special access, “Appear on top”, and switch on Watch Helper.");
     }
   }
 

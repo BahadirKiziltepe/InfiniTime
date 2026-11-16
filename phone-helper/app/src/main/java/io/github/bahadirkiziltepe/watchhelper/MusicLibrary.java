@@ -132,8 +132,22 @@ final class MusicLibrary {
 
   private final SpotifyAccount account;
   private final EventLog log;
-  /** Starts Spotify on the phone when it is not running, the way a headset's play button does. */
-  private final Runnable wakeSpotify;
+  /** Starts Spotify on the phone when it is not running there. See {@link SpotifyStarter}. */
+  interface Waker {
+    /** Asks for Spotify to be started. Returns at once; the starting itself takes several seconds. */
+    void wake();
+
+    /** A player has turned up, so there is nothing left to start. */
+    void awake();
+  }
+
+  private final Waker waker;
+  /** Run every few seconds while Spotify is being waited for, so the watch knows an answer is coming. */
+  private volatile Runnable waitingNote;
+  /** How long Spotify gets to turn up, how often that is looked for, and how often the watch is told. */
+  private static final long WAKE_MS = 15_000;
+  private static final long WAKE_LOOK_MS = 1_500;
+  private static final long WAKE_TELL_MS = 4_000;
 
   private List<Playlist> playlists;
   private long playlistsAt;
@@ -159,10 +173,15 @@ final class MusicLibrary {
   private volatile int playlistCount = -1;
   private volatile String lastProblem = "";
 
-  MusicLibrary(SpotifyAccount account, EventLog log, Runnable wakeSpotify) {
+  MusicLibrary(SpotifyAccount account, EventLog log, Waker waker) {
     this.account = account;
     this.log = log;
-    this.wakeSpotify = wakeSpotify;
+    this.waker = waker;
+  }
+
+  /** What to run every few seconds while Spotify is being waited for, or null. Background thread. */
+  void whileWaiting(Runnable note) {
+    waitingNote = note;
   }
 
   /** Forgets everything, for when somebody else logs in or nobody is logged in any more. */
@@ -679,48 +698,100 @@ final class MusicLibrary {
     if (reply.code == 404) {
       String device = phonePlayer();
       if (device == null) {
-        throw new Problem("Open Spotify", "Spotify is not running on the phone. Open it once and try again.",
+        throw new Problem("Open Spotify", "Spotify did not start on the phone. Open it once and try again.",
             "no Spotify player to send the command to");
       }
       reply = call(method, path + (path.contains("?") ? "&" : "?") + "device_id=" + SpotifyAccount.encode(device), body);
+      if (reply.code == 404 || reply.code == 502) {
+        // A player that has only just started may not take a command yet. Once more, a moment later.
+        pause(WAKE_LOOK_MS);
+        reply = call(method, path + (path.contains("?") ? "&" : "?") + "device_id=" + SpotifyAccount.encode(device), body);
+      }
     }
     need(reply);
   }
 
-  /** The id of the player to use when none is active: an active one if any, else a phone, else whatever there is. */
+  /**
+   * The id of the player to use when none is active. If Spotify is not running anywhere, it is
+   * started on the phone and waited for: see {@link SpotifyStarter}. Null if it did not turn up.
+   */
   private String phonePlayer() throws Problem {
-    for (int attempt = 0; attempt < 2; attempt++) {
-      JSONArray devices = parse(need(call("GET", "/me/player/devices", null))).optJSONArray("devices");
-      String best = null;
-      int bestScore = -1;
-      for (int i = 0; devices != null && i < devices.length(); i++) {
-        JSONObject device = devices.optJSONObject(i);
-        String id = device == null || device.isNull("id") ? "" : device.optString("id", "");
-        if (id.isEmpty() || device.optBoolean("is_restricted", false)) {
-          continue;
-        }
-        int score = (device.optBoolean("is_active", false) ? 2 : 0)
-            + ("smartphone".equalsIgnoreCase(device.optString("type", "")) ? 1 : 0);
-        if (score > bestScore) {
-          bestScore = score;
-          best = id;
-        }
+    String found = pickPlayer();
+    if (found != null) {
+      return found;
+    }
+    log.add("lists", "Spotify is not running on any device; starting it on the phone");
+    waker.wake();
+    long started = System.nanoTime();
+    long told = started - WAKE_TELL_MS * 1_000_000L;
+    while ((System.nanoTime() - started) / 1_000_000L < WAKE_MS) {
+      Runnable note = waitingNote;
+      if (note != null && (System.nanoTime() - told) / 1_000_000L >= WAKE_TELL_MS) {
+        // The watch gives up on an answer after a few seconds unless it hears that one is coming.
+        told = System.nanoTime();
+        note.run();
       }
-      if (best != null) {
-        return best;
+      if (!pause(WAKE_LOOK_MS)) {
+        return null;
       }
-      if (attempt == 0) {
-        log.add("lists", "Spotify is not running on any device; starting it on the phone");
-        wakeSpotify.run();
-        try {
-          Thread.sleep(3000);
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          return null;
-        }
+      found = pickPlayer();
+      if (found != null) {
+        log.add("lists", "Spotify is running on the phone now, after "
+            + (System.nanoTime() - started) / 1_000_000_000L + " s");
+        waker.awake();
+        return found;
       }
     }
+    log.add("lists", "Spotify did not start on the phone within " + WAKE_MS / 1000 + " s");
     return null;
+  }
+
+  /** An active player if there is one, else a phone, else whatever there is. Null if there is none. */
+  private String pickPlayer() throws Problem {
+    JSONArray devices = parse(need(call("GET", "/me/player/devices", null))).optJSONArray("devices");
+    String best = null;
+    int bestScore = -1;
+    for (int i = 0; devices != null && i < devices.length(); i++) {
+      JSONObject device = devices.optJSONObject(i);
+      String id = device == null || device.isNull("id") ? "" : device.optString("id", "");
+      if (id.isEmpty() || device.optBoolean("is_restricted", false)) {
+        continue;
+      }
+      int score = (device.optBoolean("is_active", false) ? 2 : 0)
+          + ("smartphone".equalsIgnoreCase(device.optString("type", "")) ? 1 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Asks Spotify to carry on playing on the phone, if its player has turned up at Spotify's web
+   * service. False if it has not, or nobody is logged in. Used while Spotify is being started.
+   */
+  boolean resumeIfThere() throws Problem {
+    if (!account.loggedIn()) {
+      return false;
+    }
+    String device = pickPlayer();
+    if (device == null) {
+      return false;
+    }
+    need(call("PUT", "/me/player/play?device_id=" + SpotifyAccount.encode(device), null));
+    return true;
+  }
+
+  /** False if the wait was cut short. */
+  private static boolean pause(long ms) {
+    try {
+      Thread.sleep(ms);
+      return true;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------- talking to Spotify

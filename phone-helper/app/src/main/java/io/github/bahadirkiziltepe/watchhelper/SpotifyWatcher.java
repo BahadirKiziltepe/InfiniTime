@@ -2,6 +2,7 @@ package io.github.bahadirkiziltepe.watchhelper;
 
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.media.AudioManager;
@@ -40,6 +41,9 @@ final class SpotifyWatcher {
 
   interface Listener {
     void onSpotifyChanged();
+
+    /** Music is wanted and Spotify's player is not there: Spotify has to be started first. */
+    void onSpotifyWanted(String who);
   }
 
   /** One of Spotify's own player buttons, as it offers them to other apps. */
@@ -618,8 +622,9 @@ final class SpotifyWatcher {
   void playPause(String from) {
     MediaController c = controller;
     if (c == null) {
-      log.add("control", from + ": play/pause (Spotify's player is not open, so sent as a headset button)");
-      mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE);
+      // Spotify is not running, or has put its player away. It is started first: see SpotifyStarter.
+      log.add("control", from + ": play, but Spotify's player is not open");
+      listener.onSpotifyWanted(from);
       return;
     }
     long now = SystemClock.elapsedRealtime();
@@ -639,12 +644,60 @@ final class SpotifyWatcher {
   }
 
   /**
-   * Starts Spotify when it is not running, the way a headset's play button does. Android hands
-   * that button to the app that played last.
+   * Presses play the way a headset does. Android hands that button to the app that played last,
+   * and starts that app if it is not running.
    */
-  void wakeUp() {
-    log.add("control", "starting Spotify with a headset play button");
+  void headsetPlay() {
     mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY);
+  }
+
+  /** Presses play on Spotify's own player, if it is there. */
+  void pressPlay() {
+    MediaController c = controller;
+    if (c == null) {
+      return;
+    }
+    try {
+      c.getTransportControls().play();
+    } catch (RuntimeException e) {
+      log.add("control", "play failed: " + e);
+    }
+  }
+
+  /**
+   * The app a headset button would go to right now: the one that played last. Empty if there is
+   * none, null if Android does not say (it only tells apps with notification access).
+   */
+  String headsetTarget() {
+    if (manager == null) {
+      return null;
+    }
+    try {
+      // Part of Android since version 13. Asked for by name so that an Android without it only
+      // leads to "does not say".
+      Object name = MediaSessionManager.class.getMethod("getMediaKeyEventSessionPackageName").invoke(manager);
+      return name instanceof String ? (String) name : null;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /**
+   * Hands a play button to Spotify and to nobody else. It reaches Spotify only while Spotify is
+   * running; a Spotify that has just been opened but shows no player yet can be told to play this way.
+   */
+  void playButtonToSpotify() {
+    try {
+      long now = SystemClock.uptimeMillis();
+      for (int action : new int[] {KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP}) {
+        Intent button = new Intent(Intent.ACTION_MEDIA_BUTTON);
+        button.setPackage(SPOTIFY);
+        button.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(now, now, action, KeyEvent.KEYCODE_MEDIA_PLAY, 0));
+        app.sendBroadcast(button);
+      }
+    } catch (RuntimeException e) {
+      log.add("control", "play button for Spotify failed: " + e.getClass().getSimpleName());
+    }
   }
 
   void next(String from) {

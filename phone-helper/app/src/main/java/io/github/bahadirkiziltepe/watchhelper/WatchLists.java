@@ -150,8 +150,33 @@ final class WatchLists {
       return;
     }
     io.execute(() -> {
-      final List<byte[]> answer = musicAction(kind, action, index, parent, snapshot);
+      // If Spotify has to be started on the phone first, that takes a while. The watch hears every
+      // few seconds that the answer is still coming, and says so instead of giving up.
+      library.whileWaiting(() -> main.post(() -> watch.sendPhone(
+          PhoneFrames.listResult(kind, PhoneFrames.RESULT_WORKING, "Starting Spotify"))));
+      final List<byte[]> answer;
+      try {
+        answer = musicAction(kind, action, index, parent, snapshot);
+      } finally {
+        library.whileWaiting(null);
+      }
       main.post(() -> watch.sendPhone(answer));
+    });
+  }
+
+  /**
+   * Asks Spotify's web service to carry on playing on this phone, if the phone's player has
+   * turned up there. Used while Spotify is being started for the watch's play button.
+   */
+  void resumeOnPhone() {
+    io.execute(() -> {
+      try {
+        if (library.resumeIfThere()) {
+          log.add("lists", "asked Spotify's web service to play on the phone");
+        }
+      } catch (MusicLibrary.Problem problem) {
+        // Whoever is starting Spotify tries again, or gives up.
+      }
     });
   }
 

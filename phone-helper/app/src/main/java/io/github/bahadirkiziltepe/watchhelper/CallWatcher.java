@@ -83,6 +83,11 @@ final class CallWatcher {
     PendingIntent answer;
     PendingIntent decline;
     PendingIntent hangUp;
+    /**
+     * When the clock that runs in the notification of a call under way started, by the phone's
+     * clock in milliseconds: that is when the call was answered. 0 if the notification has none.
+     */
+    long clockStarted;
     /** How the notification is built, without anything personal. For the report. */
     String shape;
   }
@@ -102,6 +107,12 @@ final class CallWatcher {
   private final TelephonyManager telephony;
   private boolean telephonyListening;
   private int phoneState = TelephonyManager.CALL_STATE_IDLE;
+  /** When the phone went into the call under way, on the clock that counts since it was switched on. -1 without a call. */
+  private long activeSince = -1;
+  /** The beginning of the call as the watch was last told. */
+  private long sentBegan = Long.MIN_VALUE;
+  /** True if the length of the call comes from the clock in its notification. For the report. */
+  private boolean timedByNote;
   /** Who the ordinary phone call is with: a contact's name, or the number. Never logged. */
   private String phoneCaller = "";
   /** Who the watch last asked to call, and when: the name for that call until Android gives one. */
@@ -272,6 +283,8 @@ final class CallWatcher {
     }
     note.incoming = callType == CALL_TYPE_INCOMING || (callType == 0 && note.answer != null);
     note.ongoing = !note.incoming && (callType == CALL_TYPE_ONGOING || sbn.isOngoing());
+    note.clockStarted = note.ongoing && n.when > 0 && extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)
+        && !extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN, false) ? n.when : 0;
     note.name = callerName(extras);
     note.shape = note.app + ", " + (callType != 0 ? "standard call notification, type " + callType : "plain notification")
         + ", buttons: " + (buttons.length() == 0 ? "none" : buttons) + ", answer " + (note.answer != null ? "yes" : "no")
@@ -427,13 +440,20 @@ final class CallWatcher {
     if (state == PhoneFrames.CALL_NONE) {
       lastName = "";
     }
+    if (state != PhoneFrames.CALL_ACTIVE) {
+      activeSince = -1;
+    } else if (activeSince < 0) {
+      activeSince = android.os.SystemClock.elapsedRealtime();
+    }
     if (state == sentState && name.equals(sentName)) {
+      sendCallTime(false);
       return;
     }
     boolean stateChanged = state != sentState;
     sentState = state;
     sentName = name;
     watch.sendPhone(PhoneFrames.call(state, name));
+    sendCallTime(true);
     changed.run();
     if (stateChanged) {
       log.add("call", state == PhoneFrames.CALL_RINGING ? "the phone is ringing"
@@ -446,6 +466,66 @@ final class CallWatcher {
     sentState = -1;
     sentName = "";
     evaluateNow();
+  }
+
+  /**
+   * When the call under way began, on the clock that counts since the phone was switched on. The
+   * running clock in the call's notification says when it was answered; without one it is the
+   * moment the phone went into the call, which for a call made from here includes the ringing.
+   */
+  private long callBegan() {
+    CallNote note = ongoingNote();
+    if (note != null && note.clockStarted > 0) {
+      long ago = System.currentTimeMillis() - note.clockStarted;
+      if (ago >= 0 && ago < 24 * 3600_000L) {
+        timedByNote = true;
+        return android.os.SystemClock.elapsedRealtime() - ago;
+      }
+    }
+    timedByNote = false;
+    return activeSince;
+  }
+
+  /**
+   * Tells the watch how long the call has been going on. It counts on by itself from there, so
+   * this is only sent with the call and again when the beginning turns out to be another.
+   */
+  private void sendCallTime(boolean always) {
+    if (sentState != PhoneFrames.CALL_ACTIVE) {
+      return;
+    }
+    long began = callBegan();
+    if (began < 0 || (!always && Math.abs(began - sentBegan) < 1_500)) {
+      return;
+    }
+    sentBegan = began;
+    watch.sendPhone(PhoneFrames.callTime((android.os.SystemClock.elapsedRealtime() - began) / 1000));
+  }
+
+  /** Which of the phone's volumes the call uses: the one for Bluetooth while the call is on a headset. */
+  private int callStream() {
+    try {
+      AudioDeviceInfo device = audio.getCommunicationDevice();
+      if (device != null && (device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+          || device.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET)) {
+        return STREAM_BLUETOOTH_CALL;
+      }
+    } catch (RuntimeException e) {
+      // The phone's own volume for calls, then.
+    }
+    return AudioManager.STREAM_VOICE_CALL;
+  }
+
+  /** The volume of the call under way in the phone's own steps, for the watch. 0xff while there is no call. */
+  int callVolume() {
+    if (audio == null || state() != PhoneFrames.CALL_ACTIVE) {
+      return 0xff;
+    }
+    try {
+      return audio.getStreamVolume(callStream());
+    } catch (RuntimeException e) {
+      return 0xff;
+    }
   }
 
   // ---------------------------------------------------------------- from the watch
@@ -617,13 +697,8 @@ final class CallWatcher {
       note("watch: call volume " + (up ? "up" : "down") + ", but there is no call");
       return;
     }
-    int stream = AudioManager.STREAM_VOICE_CALL;
     try {
-      AudioDeviceInfo device = audio.getCommunicationDevice();
-      if (device != null && (device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-          || device.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET)) {
-        stream = STREAM_BLUETOOTH_CALL;
-      }
+      int stream = callStream();
       // One of the phone's own steps, like its volume key during a call
       int before = audio.getStreamVolume(stream);
       audio.adjustStreamVolume(stream, up ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, 0);
@@ -664,6 +739,9 @@ final class CallWatcher {
     int state = state();
     sb.append("Call state: ").append(state == PhoneFrames.CALL_RINGING ? "ringing"
         : state == PhoneFrames.CALL_ACTIVE ? "in a call" : "none").append(", sound mode: ").append(mode()).append('\n');
+    sb.append("Length of the last call sent to the watch: ").append(sentBegan == Long.MIN_VALUE ? "none yet"
+        : timedByNote ? "taken from the clock in the call's notification" : "counted from when the phone went into the call")
+        .append('\n');
     sb.append("Allowed: answer calls ").append(yesNo(has(Manifest.permission.ANSWER_PHONE_CALLS)))
         .append(", phone state ").append(yesNo(has(Manifest.permission.READ_PHONE_STATE)))
         .append(", call logs ").append(yesNo(has(Manifest.permission.READ_CALL_LOG)))

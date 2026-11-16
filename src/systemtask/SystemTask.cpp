@@ -589,10 +589,11 @@ bool SystemTask::AlertsOn() {
          !nimbleController.music().isSilencedByPhone() && !batteryController.IsPowerPresent();
 }
 
-// The watch's battery or the phone's has run down to 15 % or to 5 %. The watch buzzes for it, in
-// short separate buzzes that do not feel like a notification, and the screen comes on: the number
-// of the battery in question is yellow from 15 % down and red from 5 % down. Quiet when alerts are
-// switched off, like everything else.
+// A battery has run down to its first mark or its second: the watch's or the phone's (15 % and
+// 5 %), or the earbuds' (20 % and 10 %). The watch buzzes for it, in short separate buzzes that do
+// not feel like a notification, and the screen comes on: the number of the battery in question is
+// yellow from the first mark down and red from the second. Quiet when alerts are switched off,
+// like everything else.
 void SystemTask::WarnLowBattery(bool critical) {
   if (!AlertsOn()) {
     return;

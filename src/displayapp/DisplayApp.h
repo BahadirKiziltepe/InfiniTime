@@ -144,9 +144,12 @@ namespace Pinetime {
       // The buzz for the dot on the main screen: how many pieces of it are still to come, and when the last one began
       uint8_t markBuzzLeft = 0;
       TickType_t markBuzzTick = 0;
-      // The same for a battery that has run low: that many short buzzes, one after the other
+      // The same for a battery that has run low: that many short buzzes, one after the other, each
+      // this long, and this far apart from start to start
       uint8_t batteryBuzzLeft = 0;
       TickType_t batteryBuzzTick = 0;
+      uint8_t batteryBuzzMs = 0;
+      TickType_t batteryBuzzPeriod = 0;
 
       bool isDimmed = false;
 
