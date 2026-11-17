@@ -20,8 +20,8 @@ namespace {
   // Layout of the 240x240 screen.
   //
   //   y   0.. 46  top bar: time (left); phone and watch battery (right) with the volume under them.
-  //   y  44.. 66  right: the earbuds as left|right|case, or the case alone while they are put away.
-  //               Too wide to sit next to the time, so it has the line under the volume.
+  //               Once the earbuds or their case are known, their line (earbuds|case) sits
+  //               between the two and the volume moves one line down (to y 44..66).
   //   y  66.. 90  track
   //   y  96..120  artist
   //   y 134..154  what a tap will do (play or pause), and the position in the track
@@ -42,10 +42,10 @@ namespace {
   // notifications
   constexpr lv_coord_t markerOffsetY = 24;
   // With the earbuds' line there are three lines, a little closer together so that the third one
-  // stays clear of the song's title. The earbuds' line is the third: left|right|case is up to
-  // eleven characters wide, which is more than there is room for next to the time.
-  constexpr lv_coord_t markerTightOffsetY = 22;
-  constexpr lv_coord_t earbudsOffsetY = 44;
+  // stays clear of the song's title. The earbuds' line is the second: at most seven characters
+  // ("100|100"), as wide as the line above it, which is what fits next to the time.
+  constexpr lv_coord_t earbudsOffsetY = 22;
+  constexpr lv_coord_t markerLowOffsetY = 44;
   constexpr lv_coord_t notificationIconOffsetX = -30;
   constexpr lv_coord_t waitingDotSize = 12;
   constexpr lv_coord_t waitingDotGap = 6;
@@ -64,22 +64,15 @@ namespace {
     return written > 0 && used + static_cast<size_t>(written) < size ? used + static_cast<size_t>(written) : used;
   }
 
-  // The same for one part of the earbuds' line: an earbud or the case. A dash where the level is
-  // not known. A bar goes in front of every part but the first.
+  // The same for one part of the earbuds' line: the earbuds or their case. A bar goes in front of
+  // every part but the first.
   size_t AddEarbudsPart(char* out, size_t size, size_t used, uint8_t percent) {
     using Battery = Pinetime::Controllers::LowBatteryWatch;
     if (used > 0 && used + 1 < size) {
       out[used++] = '|';
       out[used] = '\0';
     }
-    if (percent <= 100) {
-      return AddLevel(out, size, used, percent, false, Battery::EarbudsLow, Battery::EarbudsCritical);
-    }
-    if (used + 1 < size) {
-      out[used++] = '-';
-      out[used] = '\0';
-    }
-    return used;
+    return AddLevel(out, size, used, percent, false, Battery::EarbudsLow, Battery::EarbudsCritical);
   }
   constexpr lv_coord_t playerIconOffsetX = 8;
   constexpr lv_coord_t progressOffsetX = -8;
@@ -425,30 +418,23 @@ void WatchFaceRemote::UpdateLevels() {
     lv_obj_align(waitingDot, markNeighbour, LV_ALIGN_OUT_LEFT_MID, -waitingDotGap, 0);
   }
 
-  // The earbuds' line, the third one down, written like the phone's and the watch's batteries:
-  //   left|right|case   while the earbuds are connected and each one's level is known
-  //   pair|case         while they are connected and only say one number for the two of them
-  //   case              while they are put away: the level it had when it was last heard from
-  // Any part that is not known is left out, and a single earbud that is not known is a dash.
-  // The case stays even when the phone is out of reach: the watch remembers what it was told.
-  const uint8_t earbudLeft = connected ? musicService.getEarbudLeft() : Music::StateUnknown;
-  const uint8_t earbudRight = connected ? musicService.getEarbudRight() : Music::StateUnknown;
+  // The earbuds' line, right under the phone's and the watch's batteries and written like them:
+  //   earbuds|case   while the earbuds are connected to the phone: the one number they share for
+  //                  the pair, which follows them as they run down, and their case
+  //   case           while they are put away: the level it had when it was last heard from
+  // A part that is not known is left out. The case stays even when the phone is out of reach:
+  // the watch remembers what it was told. The volume and the marker for new notifications make
+  // room for the line by moving one line down.
   const uint8_t earbuds = connected ? musicService.getEarbudsBattery() : Music::StateUnknown;
   const uint8_t earbudCase = musicService.getEarbudCase();
-  if (earbudLeft != shownEarbudLeft || earbudRight != shownEarbudRight || earbuds != shownEarbuds ||
-      earbudCase != shownEarbudCase) {
-    shownEarbudLeft = earbudLeft;
-    shownEarbudRight = earbudRight;
+  if (earbuds != shownEarbuds || earbudCase != shownEarbudCase) {
     shownEarbuds = earbuds;
     shownEarbudCase = earbudCase;
 
-    char row[80];
+    char row[48];
     size_t used = 0;
     row[0] = '\0';
-    if (earbudLeft <= 100 || earbudRight <= 100) {
-      used = AddEarbudsPart(row, sizeof(row), used, earbudLeft);
-      used = AddEarbudsPart(row, sizeof(row), used, earbudRight);
-    } else if (earbuds <= 100) {
+    if (earbuds <= 100) {
       used = AddEarbudsPart(row, sizeof(row), used, earbuds);
     }
     if (earbudCase <= 100) {
@@ -462,9 +448,8 @@ void WatchFaceRemote::UpdateLevels() {
     }
     lv_obj_realign(labelEarbuds);
     if (has != shownEarbudsRow) {
-      // Three lines sit a little closer together than two
       shownEarbudsRow = has;
-      const lv_coord_t markerY = has ? markerTightOffsetY : markerOffsetY;
+      const lv_coord_t markerY = has ? markerLowOffsetY : markerOffsetY;
       lv_obj_align(labelVolume, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, markerY);
       lv_obj_align(notificationIcon, nullptr, LV_ALIGN_IN_TOP_RIGHT, notificationIconOffsetX, markerY);
     }

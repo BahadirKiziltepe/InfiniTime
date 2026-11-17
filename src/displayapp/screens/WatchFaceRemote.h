@@ -81,7 +81,7 @@ namespace Pinetime {
         lv_obj_t* waitingIcon;
         lv_img_dsc_t waitingIconImage {};
         lv_obj_t* labelVolume;
-        // The earbuds' line: left|right|case, under the volume
+        // The earbuds' line: earbuds|case, under the phone's and the watch's batteries
         lv_obj_t* labelEarbuds;
         lv_obj_t* labelTrack;
         lv_obj_t* labelArtist;
@@ -133,8 +133,6 @@ namespace Pinetime {
         bool shownPhoneCharging = false;
         uint8_t shownVolume = 0xfe;
         uint8_t shownEarbuds = 0xfe;
-        uint8_t shownEarbudLeft = 0xfe;
-        uint8_t shownEarbudRight = 0xfe;
         uint8_t shownEarbudCase = 0xfe;
         bool shownEarbudsRow = false;
         bool shownWaiting = false;

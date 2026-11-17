@@ -174,17 +174,10 @@ namespace Pinetime {
         return earbudsBattery;
       }
 
-      // The left earbud, the right earbud and their case one by one, in percent, as the earbuds
-      // broadcast them when their case is opened or closed (bytes twelve to fourteen, since phone
-      // app build 20). StateUnknown where the phone does not know. The two earbuds are only there
-      // while they are connected; the case's level is the one it had when it was last heard from,
-      // and the watch keeps it while the phone is out of reach.
-      uint8_t getEarbudLeft() const {
-        return earbudLeft;
-      }
-      uint8_t getEarbudRight() const {
-        return earbudRight;
-      }
+      // The earbuds' case, in percent, as the earbuds broadcast it when the case is opened or
+      // closed (the fourteenth byte, since phone app build 21; the two bytes before it are not
+      // used). StateUnknown if the phone has never heard it. It is the level the case had when it
+      // was last heard from, and the watch keeps it while the phone is out of reach.
       uint8_t getEarbudCase() const {
         return earbudCase;
       }
@@ -390,8 +383,6 @@ namespace Pinetime {
       bool silencedByPhone {false};
       uint8_t earbudsBattery {StateUnknown};
       uint8_t callVolume {StateUnknown};
-      uint8_t earbudLeft {StateUnknown};
-      uint8_t earbudRight {StateUnknown};
       uint8_t earbudCase {StateUnknown};
       // Tells when the phone's battery has run low, and when the earbuds' has
       LowBatteryWatch phoneBatteryWatch;

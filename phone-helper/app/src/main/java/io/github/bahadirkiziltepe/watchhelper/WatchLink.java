@@ -171,8 +171,6 @@ final class WatchLink {
   private boolean watchSilent;
   private int earbudsBattery = UNKNOWN_BYTE;
   private int callVolume = UNKNOWN_BYTE;
-  private int earbudLeft = UNKNOWN_BYTE;
-  private int earbudRight = UNKNOWN_BYTE;
   private int earbudCase = UNKNOWN_BYTE;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
@@ -961,19 +959,14 @@ final class WatchLink {
   }
 
   /**
-   * Tells the watch the left earbud, the right earbud and their case one by one, in percent, as
-   * the earbuds broadcast them; anything outside 0 to 100 for "not known" (watch build 22 and
-   * newer). The watch shows them as left|right|case, and keeps showing the case when the earbuds
-   * are put away.
+   * Tells the watch the level of the earbuds' case, in percent, as the earbuds last broadcast it;
+   * anything outside 0 to 100 for "never heard" (watch build 23 and newer). The watch shows it
+   * after the earbuds' own number, and keeps showing it while the earbuds are put away.
    */
-  void setEarbudsParts(int left, int right, int box) {
-    int newLeft = left < 0 || left > 100 ? UNKNOWN_BYTE : left;
-    int newRight = right < 0 || right > 100 ? UNKNOWN_BYTE : right;
-    int newCase = box < 0 || box > 100 ? UNKNOWN_BYTE : box;
-    if (newLeft != earbudLeft || newRight != earbudRight || newCase != earbudCase) {
-      earbudLeft = newLeft;
-      earbudRight = newRight;
-      earbudCase = newCase;
+  void setEarbudsCase(int percent) {
+    int value = percent < 0 || percent > 100 ? UNKNOWN_BYTE : percent;
+    if (value != earbudCase) {
+      earbudCase = value;
       putPhoneState();
     }
   }
@@ -999,7 +992,9 @@ final class WatchLink {
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
         (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks, (byte) soundMode,
         (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0) | (watchSilent ? 0x04 : 0)),
-        (byte) earbudsBattery, (byte) callVolume, (byte) earbudLeft, (byte) earbudRight, (byte) earbudCase});
+        (byte) earbudsBattery, (byte) callVolume,
+        // Two bytes that are not used: they once stood for each earbud by itself
+        (byte) UNKNOWN_BYTE, (byte) UNKNOWN_BYTE, (byte) earbudCase});
     pump();
   }
 

@@ -33,21 +33,14 @@ import java.util.Map;
  * <p>Which devices count: anything connected to the phone for music or for calls that Bluetooth
  * calls an audio device. If more than one shares a battery, the one heard from last is shown.
  *
- * <p>Each earbud by itself, and the case, are not in that number. Earbuds broadcast those
- * themselves when their case is opened or closed with both of them inside: see
- * {@link BudsReading}, and {@link BudsPicker} for how the user's own are told from others'. From
- * that come three things:
- *
- * <ul>
- *   <li>the case's level, kept for good and shown on the watch all the time: it is the level
- *       from when the case was last opened or closed, which is also when it last changed;
- *   <li>the left and the right earbud at the moment they were taken out. They are shown one by
- *       one for as long as they still agree with the number the phone has for the pair. Once
- *       the earbuds have run down past that, nobody knows them one by one any more (unless the
- *       earbuds keep broadcasting, which they are not supposed to), and the pair's number is
- *       shown instead;
- *   <li>nothing while the earbuds lie in their closed case.
- * </ul>
+ * <p>The case is not in that number. Earbuds broadcast it themselves, together with each earbud
+ * by itself, when their case is opened or closed with both of them inside: see
+ * {@link BudsReading}, and {@link BudsPicker} for how the user's own are told from others'. The
+ * case's level from that is kept for good and shown on the watch all the time, after the
+ * earbuds' number: it is the level from when the case was last opened or closed, which is also
+ * when it last changed. Each earbud by itself is only used to check a reading against the
+ * phone's number: it is known for the moment the case was opened and not after, so the watch
+ * shows the one number that follows the earbuds as they run down.
  *
  * <p>Neither the name nor the address of a device is written to the log or the report.
  *
@@ -115,10 +108,10 @@ final class Earbuds {
   private long boxAtBefore;
   private BudsReading lastTaken;
   private long lastTakenAt;
-  private int sentLeft = -2;
-  private int sentRight = -2;
   private int sentBox = -2;
   private int goneBack;
+  /** How often the phone's number for the pair has changed: shows that it follows the earbuds. */
+  private int pairChanges;
 
   private final Runnable ask = this::askAll;
 
@@ -387,6 +380,7 @@ final class Earbuds {
       }
     }
     if (headset.level != level) {
+      pairChanges++;
       log.add("earbuds", "battery " + how + ": " + level + " %");
     }
     headset.level = level;
@@ -478,25 +472,15 @@ final class Earbuds {
     return headset == null ? UNKNOWN : headset.level;
   }
 
-  /** True if the left and the right earbud are known one by one, and still believable. */
-  private boolean oneByOne() {
-    return !headsets.isEmpty() && (left >= 0 || right >= 0) && BudsReading.fits(pair(), left, right);
-  }
-
   private void update() {
     int level = level();
     if (level != sent) {
       sent = level;
       watch.setEarbuds(level);
     }
-    boolean each = oneByOne();
-    int nowLeft = each ? left : -1;
-    int nowRight = each ? right : -1;
-    if (nowLeft != sentLeft || nowRight != sentRight || box != sentBox) {
-      sentLeft = nowLeft;
-      sentRight = nowRight;
+    if (box != sentBox) {
       sentBox = box;
-      watch.setEarbudsParts(nowLeft, nowRight, box);
+      watch.setEarbudsCase(box);
     }
     changed.run();
   }
@@ -534,18 +518,13 @@ final class Earbuds {
       return "Earbuds: none connected." + caseLine() + listening;
     }
     Headset headset = shown();
-    if (headset == null && !oneByOne()) {
+    if (headset == null) {
       Headset any = headsets.values().iterator().next();
       return "Earbuds: " + (any.name.isEmpty() ? "connected" : any.name) + ", but they have not shared a battery "
           + "level with the phone… Some only do a moment after connecting, some never." + caseLine() + listening;
     }
-    String name = headset == null || headset.name.isEmpty() ? "" : headset.name + ", ";
-    if (oneByOne()) {
-      return "✓ Earbuds: " + name + "left " + (left < 0 ? "not said" : left + " %") + ", right "
-          + (right < 0 ? "not said" : right + " %") + "." + caseLine() + listening;
-    }
-    return "✓ Earbuds: " + name + headset.level + " % for the pair. Left and right one by one are only known from "
-        + "the moment their case was opened, until they have run down past that." + caseLine() + listening;
+    return "✓ Earbuds: " + (headset.name.isEmpty() ? "" : headset.name + ", ") + headset.level
+        + " %. They tell the phone each time this changes, and the watch follows." + caseLine() + listening;
   }
 
   /** For the report. No names and no addresses. */
@@ -559,8 +538,9 @@ final class Earbuds {
         + "\nLast broadcast taken as yours: " + (lastTaken == null ? "none"
             : lastTaken.describe() + ", " + ago(SystemClock.elapsedRealtime() - lastTakenAt))
         + (goneBack == 0 ? "" : "\nTaken and then given up as somebody else's: " + goneBack)
-        + "\nOn the watch now: left " + shownPart(sentLeft) + ", right " + shownPart(sentRight) + ", case "
-        + shownPart(sentBox) + (box < 0 ? "" : " (heard " + ago(Math.max(0, System.currentTimeMillis() - boxAt)) + ")");
+        + "\nOn the watch now: earbuds " + shownPart(sent == UNKNOWN ? -1 : sent) + ", case " + shownPart(sentBox)
+        + (box < 0 ? "" : " (heard " + ago(Math.max(0, System.currentTimeMillis() - boxAt)) + ")")
+        + "\nNumbers for the pair that came in since the app started: " + pairChanges;
   }
 
   private static String shownPart(int level) {
