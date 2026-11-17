@@ -244,6 +244,7 @@ final class Core implements SpotifyWatcher.Listener, WatchLink.Listener, Updater
         if (state == BluetoothAdapter.STATE_ON) {
           log.add("watch", "Bluetooth was turned on");
           watch.onBluetoothOn();
+          earbuds.start();
         } else if (state == BluetoothAdapter.STATE_OFF) {
           log.add("watch", "Bluetooth was turned off");
           watch.onBluetoothOff();

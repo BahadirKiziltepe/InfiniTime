@@ -12,6 +12,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.SystemClock;
 
@@ -31,6 +32,22 @@ import java.util.Map;
  *
  * <p>Which devices count: anything connected to the phone for music or for calls that Bluetooth
  * calls an audio device. If more than one shares a battery, the one heard from last is shown.
+ *
+ * <p>Each earbud by itself, and the case, are not in that number. Earbuds broadcast those
+ * themselves when their case is opened or closed with both of them inside: see
+ * {@link BudsReading}, and {@link BudsPicker} for how the user's own are told from others'. From
+ * that come three things:
+ *
+ * <ul>
+ *   <li>the case's level, kept for good and shown on the watch all the time: it is the level
+ *       from when the case was last opened or closed, which is also when it last changed;
+ *   <li>the left and the right earbud at the moment they were taken out. They are shown one by
+ *       one for as long as they still agree with the number the phone has for the pair. Once
+ *       the earbuds have run down past that, nobody knows them one by one any more (unless the
+ *       earbuds keep broadcasting, which they are not supposed to), and the pair's number is
+ *       shown instead;
+ *   <li>nothing while the earbuds lie in their closed case.
+ * </ul>
  *
  * <p>Neither the name nor the address of a device is written to the log or the report.
  *
@@ -77,6 +94,32 @@ final class Earbuds {
   private String askProblem = "";
   private int sent = UNKNOWN;
 
+  // What the earbuds broadcast themselves
+  private final BudsBroadcast radio;
+  private final BudsPicker picker = new BudsPicker();
+  private final SharedPreferences store;
+  /** Each earbud as last broadcast, for the headset that is connected now. -1 where not known. */
+  private int left = -1;
+  private int right = -1;
+  /** The case: its level, and when that was heard by the phone's clock. Kept for good. -1 if never. */
+  private int box = -1;
+  private long boxAt;
+  private long boxSavedAt;
+  /**
+   * A reading was taken on judgement before the phone had a number for the pair to hold against
+   * it. Until that number arrives, what the case said before is kept to go back to.
+   */
+  private boolean unproven;
+  private long unprovenUntil;
+  private int boxBefore = -1;
+  private long boxAtBefore;
+  private BudsReading lastTaken;
+  private long lastTakenAt;
+  private int sentLeft = -2;
+  private int sentRight = -2;
+  private int sentBox = -2;
+  private int goneBack;
+
   private final Runnable ask = this::askAll;
 
   private final BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -108,10 +151,19 @@ final class Earbuds {
     this.log = log;
     this.watch = watch;
     this.changed = changed;
+    this.store = app.getSharedPreferences("earbuds", Context.MODE_PRIVATE);
+    this.box = store.getInt("case", -1);
+    this.boxAt = store.getLong("caseAt", 0);
+    this.radio = new BudsBroadcast(app, main, log, this::onBroadcast);
   }
 
   /** Starts following the phone's headsets. Safe to call any number of times. */
   void start() {
+    radio.start();
+    if (sentBox == -2) {
+      // The case's level from last time, for a watch that has just linked
+      update();
+    }
     if (started) {
       return;
     }
@@ -173,11 +225,91 @@ final class Earbuds {
 
   /** Bluetooth was switched off: nothing is connected any more. */
   void onBluetoothOff() {
+    radio.stop();
     if (!headsets.isEmpty()) {
       headsets.clear();
+      left = -1;
+      right = -1;
       log.add("earbuds", "Bluetooth is off: no headset connected");
       update();
     }
+  }
+
+  // ---------------------------------------------------------------- the earbuds' own broadcast
+
+  /** The phone's one number for the pair, or -1. */
+  private int pair() {
+    int level = level();
+    return level == UNKNOWN ? -1 : level;
+  }
+
+  private void onBroadcast(String address, int strength, BudsReading reading) {
+    long now = SystemClock.elapsedRealtime();
+    int certain = picker.certain;
+    if (picker.heard(now, address, strength, reading, headsets.containsKey(address), pair())) {
+      take(reading, picker.certain != certain);
+    }
+  }
+
+  /** A reading that is the user's earbuds'. */
+  private void take(BudsReading reading, boolean certain) {
+    long now = SystemClock.elapsedRealtime();
+    if (certain) {
+      unproven = false;
+    } else if (!unproven && !headsets.isEmpty() && pair() < 0 && (reading.left >= 0 || reading.right >= 0)) {
+      unproven = true;
+      unprovenUntil = now + 60_000;
+      boxBefore = box;
+      boxAtBefore = boxAt;
+    }
+    if (!reading.sameLevels(lastTaken)) {
+      log.add("earbuds", "their own broadcast: " + reading.describe()
+          + (certain ? " (from the headset's own address)" : ""));
+    }
+    lastTaken = reading;
+    lastTakenAt = now;
+    if (reading.box >= 0) {
+      boolean other = reading.box != box;
+      box = reading.box;
+      boxAt = System.currentTimeMillis();
+      if (other || boxAt - boxSavedAt > 60_000) {
+        save();
+      }
+    }
+    if (!headsets.isEmpty()) {
+      left = reading.left;
+      right = reading.right;
+    }
+    update();
+  }
+
+  /**
+   * The phone's number for the pair has arrived. If a reading was taken before it and the two
+   * cannot both be true, the reading was somebody else's earbuds: back to what was known before.
+   */
+  private void prove(int pairLevel) {
+    if (!unproven) {
+      return;
+    }
+    unproven = false;
+    if (SystemClock.elapsedRealtime() > unprovenUntil || BudsReading.fits(pairLevel, left, right)) {
+      return;
+    }
+    goneBack++;
+    log.add("earbuds", "the broadcast that was taken does not match the phone's number for the pair ("
+        + pairLevel + " %): it was other earbuds. Going back to what was known before.");
+    box = boxBefore;
+    boxAt = boxAtBefore;
+    left = -1;
+    right = -1;
+    lastTaken = null;
+    picker.letGo();
+    save();
+  }
+
+  private void save() {
+    boxSavedAt = boxAt;
+    store.edit().putInt("case", box).putLong("caseAt", boxAt).apply();
   }
 
   private void onConnected(BluetoothDevice device, boolean forCalls, boolean forMusic) {
@@ -193,6 +325,11 @@ final class Earbuds {
       headset.name = nameOf(device);
       headsets.put(key, headset);
       log.add("earbuds", "a headset connected (" + headsets.size() + " connected now)");
+      // Its case was opened a moment ago, and what it broadcast then was heard before this
+      BudsReading opened = picker.moment(SystemClock.elapsedRealtime(), true, -1);
+      if (opened != null) {
+        take(opened, false);
+      }
     }
     headset.calls |= forCalls;
     headset.music |= forMusic;
@@ -211,8 +348,19 @@ final class Earbuds {
       headset.music = false;
     }
     if (!headset.calls && !headset.music) {
+      int pairBefore = pair();
       headsets.remove(device.getAddress());
       log.add("earbuds", "a headset disconnected (" + headsets.size() + " connected now)");
+      if (headsets.isEmpty()) {
+        left = -1;
+        right = -1;
+        unproven = false;
+      }
+      // Its case was closed a moment ago: what it broadcast then says how full the case is now
+      BudsReading closed = picker.moment(SystemClock.elapsedRealtime(), !headsets.isEmpty(), pairBefore);
+      if (closed != null) {
+        take(closed, false);
+      }
     }
     update();
   }
@@ -243,6 +391,7 @@ final class Earbuds {
     }
     headset.level = level;
     headset.heardAt = SystemClock.elapsedRealtime();
+    prove(level);
     update();
   }
 
@@ -329,13 +478,50 @@ final class Earbuds {
     return headset == null ? UNKNOWN : headset.level;
   }
 
+  /** True if the left and the right earbud are known one by one, and still believable. */
+  private boolean oneByOne() {
+    return !headsets.isEmpty() && (left >= 0 || right >= 0) && BudsReading.fits(pair(), left, right);
+  }
+
   private void update() {
     int level = level();
     if (level != sent) {
       sent = level;
       watch.setEarbuds(level);
     }
+    boolean each = oneByOne();
+    int nowLeft = each ? left : -1;
+    int nowRight = each ? right : -1;
+    if (nowLeft != sentLeft || nowRight != sentRight || box != sentBox) {
+      sentLeft = nowLeft;
+      sentRight = nowRight;
+      sentBox = box;
+      watch.setEarbudsParts(nowLeft, nowRight, box);
+    }
     changed.run();
+  }
+
+  private static String ago(long ms) {
+    long minutes = ms / 60_000;
+    if (minutes < 1) {
+      return "just now";
+    }
+    if (minutes < 60) {
+      return minutes + " min ago";
+    }
+    if (minutes < 48 * 60) {
+      return minutes / 60 + " h ago";
+    }
+    return minutes / (24 * 60) + " days ago";
+  }
+
+  private String caseLine() {
+    if (box < 0) {
+      return "\nCase: not heard from yet. It says how full it is when it is opened or closed next to the phone "
+          + "with both earbuds inside.";
+    }
+    return "\nCase: " + box + " %, heard " + ago(Math.max(0, System.currentTimeMillis() - boxAt))
+        + ". The watch keeps showing this.";
   }
 
   /** A few lines for the screen. The name is shown here and nowhere else. */
@@ -343,18 +529,23 @@ final class Earbuds {
     if (!problem.isEmpty()) {
       return "Earbuds: " + problem + "…";
     }
+    String listening = radio.problem().isEmpty() ? "" : "\nNot listening for the case: " + radio.problem() + "…";
     if (headsets.isEmpty()) {
-      return "Earbuds: none connected. While earbuds or headphones are connected to this phone and share their "
-          + "battery, the watch shows it under its own.";
+      return "Earbuds: none connected." + caseLine() + listening;
     }
     Headset headset = shown();
-    if (headset == null) {
+    if (headset == null && !oneByOne()) {
       Headset any = headsets.values().iterator().next();
       return "Earbuds: " + (any.name.isEmpty() ? "connected" : any.name) + ", but they have not shared a battery "
-          + "level with the phone… Some only do a moment after connecting, some never.";
+          + "level with the phone… Some only do a moment after connecting, some never." + caseLine() + listening;
     }
-    return "✓ Earbuds: " + (headset.name.isEmpty() ? "" : headset.name + ", ") + headset.level
-        + " %. The watch shows this number while they are connected.";
+    String name = headset == null || headset.name.isEmpty() ? "" : headset.name + ", ";
+    if (oneByOne()) {
+      return "✓ Earbuds: " + name + "left " + (left < 0 ? "not said" : left + " %") + ", right "
+          + (right < 0 ? "not said" : right + " %") + "." + caseLine() + listening;
+    }
+    return "✓ Earbuds: " + name + headset.level + " % for the pair. Left and right one by one are only known from "
+        + "the moment their case was opened, until they have run down past that." + caseLine() + listening;
   }
 
   /** For the report. No names and no addresses. */
@@ -363,6 +554,16 @@ final class Earbuds {
     return "Headsets connected: " + headsets.size() + ", battery shown on the watch: "
         + (headset == null ? "none" : headset.level + " %") + "\nBattery announcements from Android: " + announced
         + ", answers when asked: " + answered + (askingWorks ? "" : " (asking does not work here: " + askProblem + ")")
-        + (problem.isEmpty() ? "" : "\nProblem: " + problem);
+        + (problem.isEmpty() ? "" : "\nProblem: " + problem)
+        + "\n" + radio.dump() + "\n" + picker.dump()
+        + "\nLast broadcast taken as yours: " + (lastTaken == null ? "none"
+            : lastTaken.describe() + ", " + ago(SystemClock.elapsedRealtime() - lastTakenAt))
+        + (goneBack == 0 ? "" : "\nTaken and then given up as somebody else's: " + goneBack)
+        + "\nOn the watch now: left " + shownPart(sentLeft) + ", right " + shownPart(sentRight) + ", case "
+        + shownPart(sentBox) + (box < 0 ? "" : " (heard " + ago(Math.max(0, System.currentTimeMillis() - boxAt)) + ")");
+  }
+
+  private static String shownPart(int level) {
+    return level < 0 ? "none" : level + " %";
   }
 }

@@ -529,6 +529,16 @@ int Pinetime::Controllers::MusicService::OnCommand(struct ble_gatt_access_ctxt* 
       }
       earbudsBattery = notifSize >= 10 ? static_cast<uint8_t>(s[9]) : StateUnknown;
       callVolume = notifSize >= 11 ? static_cast<uint8_t>(s[10]) : StateUnknown;
+      if (notifSize >= 14) {
+        // Each earbud and the case, which came later still (phone app build 20). A phone app that
+        // does not send them leaves the case as it was.
+        earbudLeft = static_cast<uint8_t>(s[11]);
+        earbudRight = static_cast<uint8_t>(s[12]);
+        earbudCase = static_cast<uint8_t>(s[13]);
+      } else {
+        earbudLeft = StateUnknown;
+        earbudRight = StateUnknown;
+      }
       // The earbuds' battery has just run down to 20 % or to 10 %: the same buzzes as for the
       // phone's and the watch's. Nothing is known about them while they are put away.
       const auto earbudsWarning = earbudsBatteryWatch.Update(earbudsBattery, false);
@@ -596,6 +606,10 @@ void Pinetime::Controllers::MusicService::OnDisconnect() {
   earbudsBattery = StateUnknown;
   callVolume = StateUnknown;
   callTimed = false;
+  // The case's level is kept: it is the last one heard, and that does not change by being out of
+  // the phone's reach.
+  earbudLeft = StateUnknown;
+  earbudRight = StateUnknown;
   lists.Reset();
   notificationManager.SetCall(Pinetime::Controllers::NotificationManager::CallStates::Idle, nullptr, 0);
 }

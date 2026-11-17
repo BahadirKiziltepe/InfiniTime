@@ -62,11 +62,35 @@ says so, and the report names the step that failed.
 ## Earbuds
 
 Earbuds tell the phone how full they are while they are connected to it, most of them in
-steps of ten. Android keeps that one number and announces changes; the app passes it on, and
-the watch shows it under its own battery, yellow from 20 % down and red from 10 %, with the
-same buzzes as for the phone's and the watch's battery. Earbuds that are put away say
-nothing, and nothing can ask them: the number goes when they disconnect. Neither the name
-nor the address of a headset is written to the log or the report.
+steps of ten. Android keeps that one number for the pair and announces changes; the app
+passes it on, and the watch buzzes when it runs down to 20 % and to 10 %, the same way as
+for the phone's and the watch's battery. Earbuds that are put away say nothing, and nothing
+can ask them.
+
+Each earbud by itself, and the case, are not in that number. Earbuds that pair the Fast
+Pair way broadcast them over Bluetooth for a few seconds when their case is opened or
+closed with both of them inside ([Google's description][fp-battery]). `BudsBroadcast`
+listens for that all the time, at a pace that is easy on the battery. The broadcast does not
+say whose earbuds they are in a way an outsider can read, so `BudsPicker` goes by what can
+be known: it comes from the address of a headset connected to this phone, or it is the
+strongest one around within twenty seconds of the user's own earbuds connecting or
+disconnecting and does not contradict the phone's number for the pair. That second way is
+a judgement; if the phone's number then disagrees, the reading is given up again.
+
+The watch shows `left|right|case` on the line under the volume, yellow from 20 % down and
+red from 10 %:
+
+- the case's level is kept for good and shown all the time: it is the level from when the
+  case was last opened or closed
+- left and right are shown one by one for as long as they still agree with the phone's
+  number for the pair. Earbuds are not supposed to keep broadcasting while they are worn,
+  so once they have run down past what they said in the case, the pair's number is shown
+  in their place (`pair|case`)
+- while the earbuds are put away, the case stands alone
+
+Neither the name nor the address of a headset is written to the log or the report.
+
+[fp-battery]: https://developers.google.com/nearby/fast-pair/specifications/extensions/batterynotification
 
 ## Weather
 
@@ -164,7 +188,8 @@ with JDK 17, Gradle 8.10+ and the Android SDK (platform 35, build-tools 35.0.0).
 | `NotificationRelay.java` | Decides which notifications go to the watch and when they are taken back |
 | `CallWatcher.java` | Follows the phone's call, and answers or declines for the watch |
 | `SpotifyStarter.java` | Starts Spotify on the phone when the watch wants music and it is not running |
-| `Earbuds.java` | The battery of the earbuds that are connected to the phone |
+| `Earbuds.java` | The battery of the earbuds that are connected to the phone, and of their case |
+| `BudsBroadcast.java`, `BudsReading.java`, `BudsPicker.java` | Hearing, reading and picking the earbuds' own battery broadcast |
 | `SpotifyAccount.java`, `Http.java` | The login to Spotify's web service, and one web request |
 | `MusicLibrary.java` | Playlists, songs and queue from Spotify's web service; play and add to queue |
 | `WatchLists.java` | Answers the watch's requests for pages of its lists |

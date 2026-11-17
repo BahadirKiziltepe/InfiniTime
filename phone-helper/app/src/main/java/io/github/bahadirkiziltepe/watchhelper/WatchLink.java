@@ -171,6 +171,9 @@ final class WatchLink {
   private boolean watchSilent;
   private int earbudsBattery = UNKNOWN_BYTE;
   private int callVolume = UNKNOWN_BYTE;
+  private int earbudLeft = UNKNOWN_BYTE;
+  private int earbudRight = UNKNOWN_BYTE;
+  private int earbudCase = UNKNOWN_BYTE;
 
   // Notifications and calls are a string of messages that have to arrive in order, not a value
   // that can simply be replaced by a newer one.
@@ -958,6 +961,24 @@ final class WatchLink {
   }
 
   /**
+   * Tells the watch the left earbud, the right earbud and their case one by one, in percent, as
+   * the earbuds broadcast them; anything outside 0 to 100 for "not known" (watch build 22 and
+   * newer). The watch shows them as left|right|case, and keeps showing the case when the earbuds
+   * are put away.
+   */
+  void setEarbudsParts(int left, int right, int box) {
+    int newLeft = left < 0 || left > 100 ? UNKNOWN_BYTE : left;
+    int newRight = right < 0 || right > 100 ? UNKNOWN_BYTE : right;
+    int newCase = box < 0 || box > 100 ? UNKNOWN_BYTE : box;
+    if (newLeft != earbudLeft || newRight != earbudRight || newCase != earbudCase) {
+      earbudLeft = newLeft;
+      earbudRight = newRight;
+      earbudCase = newCase;
+      putPhoneState();
+    }
+  }
+
+  /**
    * Tells the watch the volume of the call that is under way, in the phone's own steps, or 0xff
    * while there is no call (watch build 21 and newer). The watch shows it on its call screen.
    */
@@ -978,7 +999,7 @@ final class WatchLink {
     desired.put(CH_BUTTONS, new byte[] {(byte) stateShuffle, (byte) stateRepeat, (byte) stateSaved,
         (byte) levelVolume, (byte) levelVolumeSteps, (byte) levelBattery, (byte) marks, (byte) soundMode,
         (byte) ((findRinging ? 0x01 : 0) | (phoneCharging ? 0x02 : 0) | (watchSilent ? 0x04 : 0)),
-        (byte) earbudsBattery, (byte) callVolume});
+        (byte) earbudsBattery, (byte) callVolume, (byte) earbudLeft, (byte) earbudRight, (byte) earbudCase});
     pump();
   }
 
