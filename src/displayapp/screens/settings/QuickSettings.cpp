@@ -2,7 +2,6 @@
 #include <task.h>
 #include "displayapp/DisplayApp.h"
 #include "displayapp/screens/Symbols.h"
-#include "displayapp/screens/BatteryIcon.h"
 #include "components/ble/BleController.h"
 #include "components/ble/MusicService.h"
 #include "displayapp/InfiniTimeTheme.h"
@@ -14,8 +13,6 @@ namespace {
 
   // The two phone buttons follow the phone four times a second
   constexpr uint32_t refreshPeriodMs = 250;
-  // The time and the icons next to it every five seconds, as before
-  constexpr uint8_t clockRefreshes = 20;
 
   // How long a button shows what the phone was asked for before it falls back to what the phone
   // reports. Changing the sound mode can take the phone a moment longer than starting to ring.
@@ -54,37 +51,22 @@ namespace {
 }
 
 QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
-                             const Pinetime::Controllers::Battery& batteryController,
-                             Controllers::DateTime& dateTimeController,
                              Controllers::BrightnessController& brightness,
                              Controllers::MotorController& motorController,
                              Pinetime::Controllers::Settings& settingsController,
                              const Controllers::Ble& bleController,
-                             const Controllers::AlarmController& alarmController,
                              Controllers::MusicService& musicService)
   : app {app},
-    dateTimeController {dateTimeController},
     brightness {brightness},
     motorController {motorController},
     settingsController {settingsController},
     bleController {bleController},
-    musicService {musicService},
-    statusIcons(batteryController, bleController, alarmController) {
-  statusIcons.Create();
-
-  // This is the distance (padding) between all objects on this screen.
+    musicService {musicService} {
+  // The four buttons share the whole screen, a quarter each, with this much room between them.
+  // Nothing is above them: the time, the battery and the Bluetooth sign are on the main screen.
   static constexpr uint8_t innerDistance = 10;
-
-  // Time
-  label_time = lv_label_create(lv_scr_act(), nullptr);
-  lv_label_set_align(label_time, LV_LABEL_ALIGN_CENTER);
-  lv_obj_align(label_time, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, 0, 0);
-
-  static constexpr uint8_t barHeight = 20 + innerDistance;
-  static constexpr uint8_t buttonHeight = (LV_VER_RES_MAX - barHeight - innerDistance) / 2;
-  static constexpr uint8_t buttonWidth = (LV_HOR_RES_MAX - innerDistance) / 2; // wide buttons
-  // static constexpr uint8_t buttonWidth = buttonHeight; // square buttons
-  static constexpr uint8_t buttonXOffset = (LV_HOR_RES_MAX - buttonWidth * 2 - innerDistance) / 2;
+  static constexpr uint8_t buttonHeight = (LV_VER_RES_MAX - innerDistance) / 2;
+  static constexpr uint8_t buttonWidth = (LV_HOR_RES_MAX - innerDistance) / 2;
 
   lv_style_init(&btn_style);
   lv_style_set_radius(&btn_style, LV_STATE_DEFAULT, buttonHeight / 4);
@@ -95,7 +77,7 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
   lv_obj_set_event_cb(btn1, ButtonEventHandler);
   lv_obj_add_style(btn1, LV_BTN_PART_MAIN, &btn_style);
   lv_obj_set_size(btn1, buttonWidth, buttonHeight);
-  lv_obj_align(btn1, nullptr, LV_ALIGN_IN_TOP_LEFT, buttonXOffset, barHeight);
+  lv_obj_align(btn1, nullptr, LV_ALIGN_IN_TOP_LEFT, 0, 0);
 
   btn1_lvl = lv_label_create(btn1, nullptr);
   lv_obj_set_style_local_text_font(btn1_lvl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_sys_48);
@@ -107,7 +89,7 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
   lv_obj_set_event_cb(btn2, ButtonEventHandler);
   lv_obj_add_style(btn2, LV_BTN_PART_MAIN, &btn_style);
   lv_obj_set_size(btn2, buttonWidth, buttonHeight);
-  lv_obj_align(btn2, nullptr, LV_ALIGN_IN_TOP_RIGHT, -buttonXOffset, barHeight);
+  lv_obj_align(btn2, nullptr, LV_ALIGN_IN_TOP_RIGHT, 0, 0);
 
   btn2_lvl = lv_label_create(btn2, nullptr);
   lv_obj_set_style_local_text_font(btn2_lvl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_sys_48);
@@ -119,7 +101,7 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
   lv_obj_set_event_cb(btn3, ButtonEventHandler);
   lv_obj_add_style(btn3, LV_BTN_PART_MAIN, &btn_style);
   lv_obj_set_size(btn3, buttonWidth, buttonHeight);
-  lv_obj_align(btn3, nullptr, LV_ALIGN_IN_BOTTOM_LEFT, buttonXOffset, 0);
+  lv_obj_align(btn3, nullptr, LV_ALIGN_IN_BOTTOM_LEFT, 0, 0);
 
   btn3_lvl = lv_label_create(btn3, nullptr);
   lv_obj_set_style_local_text_font(btn3_lvl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_sys_48);
@@ -130,7 +112,7 @@ QuickSettings::QuickSettings(Pinetime::Applications::DisplayApp* app,
   lv_obj_set_event_cb(btn4, ButtonEventHandler);
   lv_obj_add_style(btn4, LV_BTN_PART_MAIN, &btn_style);
   lv_obj_set_size(btn4, buttonWidth, buttonHeight);
-  lv_obj_align(btn4, nullptr, LV_ALIGN_IN_BOTTOM_RIGHT, -buttonXOffset, 0);
+  lv_obj_align(btn4, nullptr, LV_ALIGN_IN_BOTTOM_RIGHT, 0, 0);
 
   lv_obj_t* lbl_btn = lv_label_create(btn4, nullptr);
   lv_obj_set_style_local_text_font(lbl_btn, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_sys_48);
@@ -149,12 +131,6 @@ QuickSettings::~QuickSettings() {
 }
 
 void QuickSettings::UpdateScreen() {
-  if (refreshesToClock == 0) {
-    lv_label_set_text(label_time, dateTimeController.FormattedTime().c_str());
-    statusIcons.Update();
-    refreshesToClock = clockRefreshes;
-  }
-  refreshesToClock--;
   ShowPhoneButtons();
 }
 

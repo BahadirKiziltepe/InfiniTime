@@ -22,6 +22,7 @@ namespace {
   //   y   0.. 46  top bar: time (left); phone and watch battery (right) with the volume under them.
   //               Once the earbuds or their case are known, their line (earbuds|case) sits
   //               between the two and the volume moves one line down (to y 44..66).
+  //   y  44.. 68  under the time, on the left: the date, as "Wed 11/18"
   //   y  66.. 90  track
   //   y  96..120  artist
   //   y 134..154  what a tap will do (play or pause), and the position in the track
@@ -46,6 +47,10 @@ namespace {
   // ("100|100"), as wide as the line above it, which is what fits next to the time.
   constexpr lv_coord_t earbudsOffsetY = 22;
   constexpr lv_coord_t markerLowOffsetY = 44;
+  // The date is under the time, on the row the volume moves down to. It starts where the digits
+  // of the time start, which stand a little further in than their label does.
+  constexpr lv_coord_t dateOffsetX = 6;
+  constexpr lv_coord_t dateOffsetY = markerLowOffsetY;
   constexpr lv_coord_t notificationIconOffsetX = -30;
   constexpr lv_coord_t waitingDotSize = 12;
   constexpr lv_coord_t waitingDotGap = 6;
@@ -227,6 +232,12 @@ WatchFaceRemote::WatchFaceRemote(Controllers::DateTime& dateTimeController,
   lv_label_set_text_static(labelAmPm, "");
   lv_obj_align(labelAmPm, labelTime, LV_ALIGN_OUT_RIGHT_MID, 0, 6);
 
+  // Under the time: the date. The day of the week in three letters, then month/day.
+  labelDate = lv_label_create(lv_scr_act(), nullptr);
+  lv_obj_set_style_local_text_color(labelDate, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
+  lv_label_set_text_static(labelDate, "");
+  lv_obj_align(labelDate, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, dateOffsetX, dateOffsetY);
+
   // Track and artist. Text that does not fit scrolls.
   labelTrack = lv_label_create(lv_scr_act(), nullptr);
   lv_label_set_long_mode(labelTrack, LV_LABEL_LONG_SROLL_CIRC);
@@ -338,6 +349,21 @@ void WatchFaceRemote::Refresh() {
     }
     lv_obj_realign(labelTime);
     lv_obj_realign(labelAmPm);
+
+    // The date is only written again when it is another day
+    const auto weekday = dateTimeController.DayOfWeek();
+    const auto month = static_cast<uint8_t>(dateTimeController.Month());
+    const uint8_t day = dateTimeController.Day();
+    const auto date = static_cast<uint16_t>((static_cast<uint8_t>(weekday) << 9) | (month << 5) | day);
+    if (date != shownDate) {
+      shownDate = date;
+      lv_label_set_text_fmt(labelDate,
+                            "%s %d/%d",
+                            Controllers::DateTime::DayOfWeekShortToStringLow(weekday),
+                            static_cast<int>(month),
+                            static_cast<int>(day));
+      lv_obj_realign(labelDate);
+    }
   }
 
   if (skipHintVisible && (now - skipHintTick) >= skipHintDuration) {

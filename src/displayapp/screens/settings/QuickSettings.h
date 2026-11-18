@@ -4,12 +4,10 @@
 #include "displayapp/screens/Screen.h"
 #include <lvgl/lvgl.h>
 #include <FreeRTOS.h>
-#include "components/datetime/DateTimeController.h"
+#include "components/ble/BleController.h"
 #include "components/brightness/BrightnessController.h"
 #include "components/motor/MotorController.h"
 #include "components/settings/Settings.h"
-#include "components/battery/BatteryController.h"
-#include "displayapp/widgets/StatusIcons.h"
 
 namespace Pinetime {
   namespace Controllers {
@@ -20,7 +18,8 @@ namespace Pinetime {
     namespace Screens {
 
       /**
-       * The settings screen, above the notifications. Four big buttons:
+       * The settings screen, above the notifications. Four big buttons that share the whole
+       * screen, a quarter each; there is no clock and there are no icons above them:
        *
        *   brightness               find my phone
        *   the phone's sound mode   the list of settings
@@ -37,13 +36,10 @@ namespace Pinetime {
       class QuickSettings : public Screen {
       public:
         QuickSettings(DisplayApp* app,
-                      const Pinetime::Controllers::Battery& batteryController,
-                      Controllers::DateTime& dateTimeController,
                       Controllers::BrightnessController& brightness,
                       Controllers::MotorController& motorController,
                       Pinetime::Controllers::Settings& settingsController,
                       const Controllers::Ble& bleController,
-                      const Controllers::AlarmController& alarmController,
                       Controllers::MusicService& musicService);
 
         ~QuickSettings() override;
@@ -56,7 +52,6 @@ namespace Pinetime {
         void ShowPhoneButtons();
 
         DisplayApp* app;
-        Controllers::DateTime& dateTimeController;
         Controllers::BrightnessController& brightness;
         Controllers::MotorController& motorController;
         Controllers::Settings& settingsController;
@@ -64,7 +59,6 @@ namespace Pinetime {
         Controllers::MusicService& musicService;
 
         lv_task_t* taskUpdate;
-        lv_obj_t* label_time;
 
         lv_style_t btn_style;
 
@@ -88,11 +82,6 @@ namespace Pinetime {
         // What the two phone buttons show at the moment (a value neither can have: not drawn yet)
         uint8_t shownSound = 0xfe;
         uint8_t shownFind = 0xfe;
-
-        // Refreshes left until the time and the icons next to it are looked at again
-        uint8_t refreshesToClock = 0;
-
-        Widgets::StatusIcons statusIcons;
       };
     }
   }

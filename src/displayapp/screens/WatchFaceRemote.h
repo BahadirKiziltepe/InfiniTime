@@ -73,6 +73,9 @@ namespace Pinetime {
 
         lv_obj_t* labelTime;
         lv_obj_t* labelAmPm;
+        lv_obj_t* labelDate;
+        // The date that is written there, packed into one number (one that no date gives: none yet)
+        uint16_t shownDate = 0xffff;
         lv_obj_t* labelBattery;
         lv_obj_t* notificationIcon;
         // A crossed-out speaker: the phone has told the watch to stay silent

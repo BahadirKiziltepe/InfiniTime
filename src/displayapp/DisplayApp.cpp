@@ -746,13 +746,10 @@ void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections directio
     } break;
     case Apps::QuickSettings:
       currentScreen = std::make_unique<Screens::QuickSettings>(this,
-                                                               batteryController,
-                                                               dateTimeController,
                                                                brightnessController,
                                                                motorController,
                                                                settingsController,
                                                                bleController,
-                                                               alarmController,
                                                                systemTask->nimble().music());
       break;
     case Apps::PhoneWeather:
