@@ -6,8 +6,8 @@ The Android companion for the watch firmware in this repository. It is deliberat
 - acts on the watch's music buttons: play/pause, next, previous, volume
 - keeps the watch's clock right
 - passes notifications from Google Messages, WhatsApp and Discord on to the watch, and takes
-  them off the watch again when they go away on the phone; holding a notification on the
-  watch clears it on the phone
+  them off the watch again when they go away on the phone; a swipe to the right on a
+  notification on the watch clears it on the phone
 - starts Spotify on the phone when play is pressed on the watch and Spotify is not running;
   see below
 - tells the watch when the phone rings or is in a call, and answers or declines a ringing
