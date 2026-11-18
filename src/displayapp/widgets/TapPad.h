@@ -51,6 +51,13 @@ namespace Pinetime {
           muteDuration = duration;
         }
 
+        /** Whatever touch is under way does not count: it began before the screen was ready for it */
+        void Spend() {
+          pressSpent = true;
+          tapWaiting = false;
+          pending = Events::None;
+        }
+
         /** A finger is down, or a tap is still waiting to see whether a second one follows */
         bool Busy() const {
           return fingerDown || tapWaiting;

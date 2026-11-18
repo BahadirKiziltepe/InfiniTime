@@ -29,11 +29,12 @@ namespace Pinetime {
        * - Queue: only shown. It hangs below the main screen: swiping down on its first page goes back
        *   there. The playlists are one swipe to the left further on, the history one swipe to the right.
        * - Playlists: a tap opens the songs, a hold plays the playlist.
-       * - Songs: a tap adds the song to the queue, a hold plays it in its playlist.
-       * - History (the songs played last, to the left of the queue): a tap adds the song to the
-       *   queue, a hold plays it on its own, after which Spotify carries on with songs like it.
-       * - Contacts: a tap asks "Call ...?". A second tap makes the phone place the call; holding the
-       *   screen, or a swipe, takes the question back. It also goes away by itself after ten seconds.
+       * - Songs: a tap plays the song in its playlist, a hold adds it to the queue.
+       * - History (the songs played last, to the left of the queue): a tap plays the song on its
+       *   own, after which Spotify carries on with songs like it; a hold adds it to the queue.
+       * - Contacts: a tap asks "Call ...?". A second tap makes the phone place the call; a swipe
+       *   takes the question back. It also goes away by itself after ten seconds. Holding does
+       *   nothing here that a tap does not.
        * - Calls (the call history, to the right of the contacts): who it was, and under that whether
        *   the call was made, received or missed and when. Missed calls are red. A tap asks
        *   "Call ...?" exactly as the contacts do.

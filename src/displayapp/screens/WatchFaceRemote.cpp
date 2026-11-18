@@ -311,7 +311,9 @@ void WatchFaceRemote::Refresh() {
   UpdateTaps(now);
   UpdateLevels();
 
-  notificationState = notificationManager.AreNewNotificationsAvailable();
+  // The sign next to the volume is there for as long as the watch holds a notification, read or
+  // not, and gone when there is none.
+  notificationState = notificationManager.NbNotifications() > 0;
   if (notificationState.IsUpdated()) {
     lv_label_set_text_static(notificationIcon, NotificationIcon::GetIcon(notificationState.Get()));
     lv_obj_realign(notificationIcon);

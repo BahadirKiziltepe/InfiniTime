@@ -145,12 +145,15 @@ PhoneList::PhoneList(DisplayApp* app,
   labelHint = lv_label_create(lv_scr_act(), nullptr);
   lv_obj_set_style_local_text_color(labelHint, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, Colors::lightGray);
   lv_label_set_align(labelHint, LV_LABEL_ALIGN_CENTER);
-  lv_label_set_text_static(labelHint, "Tap: call\nHold: cancel");
+  lv_label_set_text_static(labelHint, "Tap: call\nSwipe: cancel");
   lv_obj_align(labelHint, lv_scr_act(), LV_ALIGN_IN_BOTTOM_MID, 0, -6);
   lv_obj_set_hidden(labelHint, true);
 
   // Lies over everything else and tells taps from holds; the row is worked out from where the finger was
-  tapPad.Create(false, holdDuration);
+  // Holding a row only means something where there is music to play or to queue. Everywhere else
+  // a finger that stays down is a tap once it is lifted.
+  const bool holds = kind == Kinds::Playlists || kind == Kinds::Songs || kind == Kinds::History;
+  tapPad.Create(false, holds ? holdDuration : 0);
   tapPad.Mute(xTaskGetTickCount(), appearMute);
 
   if (kind == Kinds::Songs) {
@@ -324,16 +327,11 @@ void PhoneList::OnTap(Widgets::TapPad::Events tap, TickType_t now) {
     return;
   }
   if (confirming) {
-    if (!calling) {
-      if (isTap) {
-        calling = true;
-        confirmTick = now;
-        Act(Pinetime::Controllers::MusicService::ActionTap, confirmIndex, "Calling...");
-      } else {
-        // Holding takes the question back, the way holding a ringing call declines it
-        motorController.RunForDuration(confirmBuzzMs);
-        StopConfirming();
-      }
+    // A tap places the call. A swipe takes the question back: see OnTouchEvent.
+    if (!calling && isTap) {
+      calling = true;
+      confirmTick = now;
+      Act(Pinetime::Controllers::MusicService::ActionTap, confirmIndex, "Calling...");
       needsDraw = true;
     }
     return;
@@ -358,10 +356,13 @@ void PhoneList::OnTap(Widgets::TapPad::Events tap, TickType_t now) {
       break;
     case Kinds::Songs:
     case Kinds::History:
+      // A tap plays the song and a hold queues it. The two actions are named after the gestures
+      // they had at first, the other way round; the phone knows them by their numbers: the one
+      // called ActionTap queues, the one called ActionHold plays.
       if (isTap) {
-        Act(Pinetime::Controllers::MusicService::ActionTap, index, "Adding...");
-      } else {
         Act(Pinetime::Controllers::MusicService::ActionHold, index, "Starting...");
+      } else {
+        Act(Pinetime::Controllers::MusicService::ActionTap, index, "Adding...");
       }
       break;
     case Kinds::Contacts:

@@ -541,8 +541,8 @@ void DisplayApp::Refresh() {
           if (currentApp == Apps::Clock) {
             switch (gesture) {
               case TouchEvents::SwipeDown:
-                // While the phone rings or is in a call, the call screen comes first and the
-                // notifications are one swipe further
+                // While the phone rings or is in a call, the call screen is what is above the
+                // main screen, and no swipe leads on from it
                 if (notificationManager.CallState() != Controllers::NotificationManager::CallStates::Idle) {
                   LoadNewScreen(Apps::Call, DisplayApp::FullRefreshDirections::Down);
                 } else {

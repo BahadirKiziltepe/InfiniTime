@@ -30,10 +30,10 @@ namespace Pinetime {
        * - The screen lies above the main screen and below the settings. Swiping up at the end of the
        *   text leads back to the main screen, swiping down at its top leads on to the settings, and
        *   the contacts are one swipe to the left.
-       * - Holding the screen clears the notification on the phone. A notification goes away when the
-       *   phone takes it back, which the Watch Helper phone app does when it is cleared or read on the
-       *   phone - or was just cleared from here. Notices from the watch itself have no phone behind
-       *   them; they go once this screen has been opened and closed, or when they are held.
+       * - A swipe to the right clears the notification on the phone. A notification goes away when
+       *   the phone takes it back, which the Watch Helper phone app does when it is cleared or read
+       *   on the phone - or was just cleared from here. Notices from the watch itself have no phone
+       *   behind them; they go once this screen has been opened and closed, or with that swipe.
        *
        * In Preview mode the screen has come up by itself for a new notification. It closes again after
        * a few seconds unless the screen is touched; from then on it behaves like the normal one.
@@ -55,6 +55,7 @@ namespace Pinetime {
       private:
         void Reload();
         void Show();
+        void ClearShown();
         void ScrollTo(lv_coord_t offset, bool animate);
 
         Pinetime::Controllers::NotificationManager& notificationManager;

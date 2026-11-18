@@ -25,19 +25,23 @@ namespace Pinetime {
       /**
        * The phone's call, as reported by the Watch Helper phone app.
        *
-       * While the phone rings: who is calling. A tap answers, tap and hold declines. The watch buzzes
-       * without a break until one of the two happens, the call stops ringing, the screen is left, or a
-       * sideways swipe silences it.
+       * While the phone rings: who is calling. A tap answers, a swipe in any direction declines.
+       * The watch buzzes without a break until one of the two happens, the call stops ringing or
+       * the screen is left.
        *
        * During the call: how long it has been going on, and in the top right corner the volume of
        * the call as a number, in the phone's own steps like the one on the main screen. A swipe to
-       * the left or right turns that volume down or up, and holding the finger down for a second
-       * hangs up.
+       * the left or right turns that volume down or up, and a tap hangs up.
        *
        * The time of day is in the top left corner all along, where the main screen has it.
        *
-       * For as long as there is a call, this screen sits between the main screen (swipe up) and the
-       * notifications above it (swipe down). It closes by itself when the call is over.
+       * Nothing is held on this screen, and no swipe leads away from it: for as long as there is
+       * a call, this is the screen. (The side button still does what it does.) It closes by itself
+       * when the call is over.
+       *
+       * A tap that hangs up must be meant. So a touch does not count if it began before the screen
+       * was ready for it: while the screen was coming up, in the first moments of the call (the tap
+       * that answered it may have a second one behind it), or as the watch was being woken.
        */
       class Call : public Screen {
       public:
@@ -59,6 +63,7 @@ namespace Pinetime {
         enum class Actions : uint8_t { None, Answering, Declining, Ending };
 
         void Draw(CallStates state);
+        void Decline(TickType_t now);
         void DrawClock();
         void DrawDuration(CallStates state);
         void DrawVolume(CallStates state, TickType_t now);
@@ -80,6 +85,12 @@ namespace Pinetime {
         lv_obj_t* labelHint;
         lv_obj_t* labelVolume;
         Widgets::TapPad tapPad;
+
+        // When the screen came up, and when it was last refreshed (it is not while the watch sleeps)
+        TickType_t appearTick = 0;
+        TickType_t refreshTick = 0;
+        // What the call was at the last refresh, to notice the moment it is answered
+        CallStates lastState = CallStates::Idle;
 
         // What is on the screen, to redraw only when it changes
         bool drawn = false;

@@ -31,12 +31,16 @@ namespace {
 
   constexpr lv_color_t callColor = LV_COLOR_MAKE(0x1e, 0xd7, 0x60);
 
-  // Keeping the finger down this long declines a ringing call
-  constexpr TickType_t holdDuration = pdMS_TO_TICKS(600);
-  // Ending a call that is under way takes a longer hold, so it does not happen by accident
-  constexpr TickType_t hangUpHoldDuration = pdMS_TO_TICKS(1000);
-  // The screen came up by itself. A touch that was on its way to the screen before does not answer the call.
+  // The screen came up by itself. A touch that was on its way to the screen before does not
+  // answer the call or end it, and a swipe that was under way does not decline it.
   constexpr TickType_t appearMute = pdMS_TO_TICKS(700);
+  // A tap ends a call that is under way, so the first moments of a call take no taps: the tap
+  // that answered it may have a second one right behind it.
+  constexpr TickType_t answeredMute = pdMS_TO_TICKS(1500);
+  // The screen is not refreshed while the watch sleeps. A longer gap than this means it has just
+  // been woken, and the touch that woke it does not end the call.
+  constexpr TickType_t sleptGap = pdMS_TO_TICKS(400);
+  constexpr TickType_t wakeMute = pdMS_TO_TICKS(800);
   // If the phone has not reported the call answered or gone this long after being asked, show it ringing again
   constexpr TickType_t actionTimeout = pdMS_TO_TICKS(4000);
 
@@ -119,17 +123,20 @@ Call::Call(DisplayApp* app,
   lv_label_set_text_static(labelHint, "");
   lv_obj_align(labelHint, lv_scr_act(), LV_ALIGN_IN_BOTTOM_MID, 0, hintOffsetY);
 
-  // A tap answers at once: there is no double tap to wait for here
-  tapPad.Create(false, holdDuration);
+  // A tap answers at once: there is no double tap to wait for here, and nothing is held
+  tapPad.Create(false, 0);
 
   const TickType_t now = xTaskGetTickCount();
-  if (ring && notificationManager.CallState() == CallStates::Ringing) {
+  appearTick = now;
+  refreshTick = now;
+  lastState = notificationManager.CallState();
+  if (ring && lastState == CallStates::Ringing) {
     buzzing = true;
     buzzStartTick = now;
     lastBuzzTick = now - buzzPeriod;
     wakeLock.Lock();
-    tapPad.Mute(now, appearMute);
   }
+  tapPad.Mute(now, lastState == CallStates::Active ? answeredMute : appearMute);
 
   taskRefresh = lv_task_create(RefreshTaskCallback, LV_DISP_DEF_REFR_PERIOD, LV_TASK_PRIO_MID, this);
   Refresh();
@@ -150,11 +157,34 @@ void Call::StopBuzz() {
   }
 }
 
+void Call::Decline(TickType_t now) {
+  musicService.event(Controllers::MusicService::EVENT_CALL_DECLINE);
+  action = Actions::Declining;
+  actionTick = now;
+  StopBuzz();
+  motorController.RunForDuration(confirmBuzzMs);
+}
+
 void Call::Refresh() {
   const TickType_t now = xTaskGetTickCount();
-  const auto tap = tapPad.Update(now);
+  auto tap = tapPad.Update(now);
   const uint32_t revision = notificationManager.Revision();
   const CallStates state = notificationManager.CallState();
+
+  if ((now - refreshTick) >= sleptGap) {
+    // The watch was asleep until just now. The touch that woke it is not a tap on this screen.
+    tapPad.Mute(now, wakeMute);
+    tapPad.Spend();
+    tap = Widgets::TapPad::Events::None;
+  }
+  refreshTick = now;
+  if (state == CallStates::Active && lastState != CallStates::Active) {
+    // Answered this moment
+    tapPad.Mute(now, answeredMute);
+    tapPad.Spend();
+    tap = Widgets::TapPad::Events::None;
+  }
+  lastState = state;
 
   if (state == CallStates::Idle) {
     // The call is over, or was never there
@@ -170,23 +200,15 @@ void Call::Refresh() {
     // The phone did not do it. The call is as it was.
     action = Actions::None;
   }
-  tapPad.SetHoldDuration(state == CallStates::Ringing ? holdDuration : hangUpHoldDuration);
 
-  if (state == CallStates::Ringing && action == Actions::None) {
-    if (tap == Widgets::TapPad::Events::Tap) {
-      musicService.event(Controllers::MusicService::EVENT_CALL_ANSWER);
-      action = Actions::Answering;
-      actionTick = now;
-    } else if (tap == Widgets::TapPad::Events::Hold) {
-      musicService.event(Controllers::MusicService::EVENT_CALL_DECLINE);
-      action = Actions::Declining;
-      actionTick = now;
-    }
-    if (action != Actions::None) {
-      StopBuzz();
-      motorController.RunForDuration(confirmBuzzMs);
-    }
-  } else if (state == CallStates::Active && action == Actions::None && tap == Widgets::TapPad::Events::Hold) {
+  // A tap answers a ringing call and ends one that is under way. Declining is a swipe: see OnTouchEvent.
+  if (state == CallStates::Ringing && action == Actions::None && tap == Widgets::TapPad::Events::Tap) {
+    musicService.event(Controllers::MusicService::EVENT_CALL_ANSWER);
+    action = Actions::Answering;
+    actionTick = now;
+    StopBuzz();
+    motorController.RunForDuration(confirmBuzzMs);
+  } else if (state == CallStates::Active && action == Actions::None && tap == Widgets::TapPad::Events::Tap) {
     musicService.event(Controllers::MusicService::EVENT_CALL_HANGUP);
     action = Actions::Ending;
     actionTick = now;
@@ -303,46 +325,47 @@ void Call::Draw(CallStates state) {
       lv_label_set_text_static(labelHint, "");
     } else {
       lv_label_set_text_static(labelState, "Incoming call");
-      lv_label_set_text_static(labelHint, "Tap: answer\nHold: decline");
+      lv_label_set_text_static(labelHint, "Tap: answer\nSwipe: decline");
     }
   } else if (action == Actions::Ending) {
     lv_label_set_text_static(labelState, "Hanging up...");
     lv_label_set_text_static(labelHint, "");
   } else {
     lv_label_set_text_static(labelState, "On a call");
-    lv_label_set_text_static(labelHint, "Swipe: call volume\nHold: hang up");
+    lv_label_set_text_static(labelHint, "Swipe: call volume\nTap: hang up");
   }
   lv_obj_realign(labelState);
   lv_obj_realign(labelHint);
 }
 
 bool Call::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
-  switch (event) {
-    case TouchEvents::SwipeLeft:
-    case TouchEvents::SwipeRight:
-      if (notificationManager.CallState() == CallStates::Ringing) {
-        // Nothing to turn up or down yet. A sideways swipe stops the buzzing; the phone keeps ringing.
-        StopBuzz();
-      } else {
-        const bool up = event == TouchEvents::SwipeRight;
-        musicService.event(up ? Controllers::MusicService::EVENT_CALL_VOLUP : Controllers::MusicService::EVENT_CALL_VOLDOWN);
-        motorController.RunForDuration(confirmBuzzMs);
-        if (musicService.getCallVolume() == Controllers::MusicService::StateUnknown) {
-          // The phone does not say the number. An arrow shows that the swipe was taken.
-          lv_label_set_text_static(labelVolume, up ? Symbols::volumUp : Symbols::volumDown);
-          lv_obj_set_hidden(labelVolume, false);
-          lv_obj_realign(labelVolume);
-          volumeHintVisible = true;
-          volumeHintTick = xTaskGetTickCount();
-          shownVolume = volumeNotDrawn;
-        }
-      }
-      return true;
-    case TouchEvents::SwipeDown:
-      // The notifications are one further up
-      app->StartApp(Apps::Notifications, DisplayApp::FullRefreshDirections::Down);
-      return true;
-    default:
-      return false;
+  const bool swipe = event == TouchEvents::SwipeUp || event == TouchEvents::SwipeDown || event == TouchEvents::SwipeLeft ||
+                     event == TouchEvents::SwipeRight;
+  if (!swipe) {
+    // The touch controller also reports every tap here. Those are the tap pad's business.
+    return false;
   }
+  const TickType_t now = xTaskGetTickCount();
+  const CallStates state = notificationManager.CallState();
+  if (state == CallStates::Ringing) {
+    // A swipe in any direction declines. Not one that was under way when the screen came up, though.
+    if (action == Actions::None && (now - appearTick) >= appearMute) {
+      Decline(now);
+    }
+  } else if (state == CallStates::Active && (event == TouchEvents::SwipeLeft || event == TouchEvents::SwipeRight)) {
+    const bool up = event == TouchEvents::SwipeRight;
+    musicService.event(up ? Controllers::MusicService::EVENT_CALL_VOLUP : Controllers::MusicService::EVENT_CALL_VOLDOWN);
+    motorController.RunForDuration(confirmBuzzMs);
+    if (musicService.getCallVolume() == Controllers::MusicService::StateUnknown) {
+      // The phone does not say the number. An arrow shows that the swipe was taken.
+      lv_label_set_text_static(labelVolume, up ? Symbols::volumUp : Symbols::volumDown);
+      lv_obj_set_hidden(labelVolume, false);
+      lv_obj_realign(labelVolume);
+      volumeHintVisible = true;
+      volumeHintTick = now;
+      shownVolume = volumeNotDrawn;
+    }
+  }
+  // No swipe leads away from a call: for as long as it lasts, this is the screen
+  return true;
 }

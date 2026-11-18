@@ -42,8 +42,7 @@ namespace {
   constexpr uint8_t buzzPieceMs = 250;
   constexpr uint8_t buzzLastPieceMs = 200;
 
-  // Keeping the finger down this long clears the notification on the phone
-  constexpr TickType_t holdDuration = pdMS_TO_TICKS(700);
+  // A swipe to the right clears the notification on the phone; the watch gives a short buzz for it
   constexpr uint8_t clearBuzzMs = 15;
   // If the phone has not taken the notification back by then, it is shown as before
   constexpr TickType_t clearTimeout = pdMS_TO_TICKS(4000);
@@ -138,8 +137,8 @@ Notifications::Notifications(Pinetime::Controllers::NotificationManager& notific
   lv_obj_align(labelEmpty, lv_scr_act(), LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_hidden(labelEmpty, true);
 
-  // Tap for the next one, double tap for the one before, hold to clear it
-  tapPad.Create(true, holdDuration);
+  // Tap for the next one, double tap for the one before. Nothing is held here.
+  tapPad.Create(true, 0);
 
   shownTick = xTaskGetTickCount();
   if (mode == Modes::Preview) {
@@ -195,21 +194,7 @@ void Notifications::Refresh() {
     }
   }
 
-  if (tap == Widgets::TapPad::Events::Hold && showing && !clearing) {
-    motorController.RunForDuration(clearBuzzMs);
-    if (currentPhoneId != 0) {
-      // Cleared on the phone. The phone then takes it back from the watch, like any other
-      // notification that is cleared there.
-      musicService.DismissNotification(currentPhoneId);
-      clearing = true;
-      clearingTick = now;
-      lv_label_set_text_static(labelCounter, "Clearing...");
-      lv_obj_realign(labelCounter);
-    } else {
-      // A notice from the watch itself
-      notificationManager.Dismiss(currentId);
-    }
-  } else if (clearing && (now - clearingTick) >= clearTimeout) {
+  if (clearing && (now - clearingTick) >= clearTimeout) {
     // The phone did not clear it (it may be one that cannot be cleared)
     Show();
   }
@@ -226,6 +211,25 @@ void Notifications::Refresh() {
 
   if (notificationManager.Revision() != shownRevision) {
     Reload();
+  }
+}
+
+// Clears the notification that is showing: on the phone, which then takes it back from the watch
+// like any other notification that is cleared there.
+void Notifications::ClearShown() {
+  if (!showing || clearing) {
+    return;
+  }
+  motorController.RunForDuration(clearBuzzMs);
+  if (currentPhoneId != 0) {
+    musicService.DismissNotification(currentPhoneId);
+    clearing = true;
+    clearingTick = xTaskGetTickCount();
+    lv_label_set_text_static(labelCounter, "Clearing...");
+    lv_obj_realign(labelCounter);
+  } else {
+    // A notice from the watch itself
+    notificationManager.Dismiss(currentId);
   }
 }
 
@@ -379,6 +383,9 @@ bool Notifications::OnTouchEvent(Pinetime::Applications::TouchEvents event) {
       }
       // Already at the top: the swipe leads on up to the settings
       return false;
+    case TouchEvents::SwipeRight:
+      ClearShown();
+      return true;
     default:
       return false;
   }
