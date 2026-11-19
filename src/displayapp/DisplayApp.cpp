@@ -353,6 +353,7 @@ void DisplayApp::Refresh() {
         // and can ignore this message. If it wasn't ignored, DisplayApp
         // would go to sleep and then immediately re-wake
         if (state != States::Running || !systemTask->IsSleeping()) {
+          clockOnSleep = false;
           break;
         }
         while (brightnessController.Level() != Controllers::BrightnessController::Levels::Low) {
@@ -365,8 +366,10 @@ void DisplayApp::Refresh() {
         } else {
           brightnessController.Set(Controllers::BrightnessController::Levels::Off);
         }
-        // Since the active screen is not really an app, go back to Clock.
-        if (currentApp == Apps::Launcher || currentApp == Apps::Notifications || currentApp == Apps::NotificationsPreview ||
+        // Since the active screen is not really an app, go back to Clock. From every other screen
+        // too if it was the side button that asked for this sleep (see PutAway).
+        if (clockOnSleep || currentApp == Apps::Launcher || currentApp == Apps::Notifications ||
+            currentApp == Apps::NotificationsPreview ||
             currentApp == Apps::Call || currentApp == Apps::QuickSettings || currentApp == Apps::Settings ||
             currentApp == Apps::Queue || currentApp == Apps::Playlists || currentApp == Apps::Songs ||
             currentApp == Apps::History || currentApp == Apps::Contacts || currentApp == Apps::Calls ||
@@ -381,6 +384,7 @@ void DisplayApp::Refresh() {
           while (!lv_task_handler()) {
           };
         }
+        clockOnSleep = false;
         // Clear any ongoing touch pressed events
         // Without this LVGL gets stuck in the pressed state and will keep refreshing the
         // display activity timer causing the screen to never sleep after timeout
@@ -581,8 +585,13 @@ void DisplayApp::Refresh() {
             // During a call the screen stays on by itself. The button is how it is switched off,
             // straight from the call screen. Waking the watch brings the call screen back.
             PushMessageToSystemTask(System::Messages::GoToSleep);
-          } else {
+          } else if (currentApp == Apps::Call) {
+            // While the phone rings, the button takes the call screen away and its buzzing with
+            // it. The call goes on ringing on the phone, and the watch stays on.
             LoadPreviousScreen();
+          } else {
+            // Everywhere else one press puts the watch away: display off, main screen next time
+            PutAway();
           }
         }
         break;
@@ -648,7 +657,25 @@ void DisplayApp::LoadNewScreen(Apps app, DisplayApp::FullRefreshDirections direc
   LoadScreen(app, direction);
 }
 
+// One press of the side button puts the watch away from wherever it is: the display goes off, and
+// the main screen is what is there when it comes back on.
+void DisplayApp::PutAway() {
+  if (systemTask->IsSleepDisabled()) {
+    // Something is keeping the watch awake. If it is the screen that is open, it lets go once
+    // that screen is closed: so the main screen comes first, and the display goes off after it.
+    LoadScreen(Apps::Clock, DisplayApp::FullRefreshDirections::None);
+    returnAppStack.Reset();
+    appStackDirections.Reset();
+  } else {
+    // The display goes off first, and the main screen is put there in the dark: see GoToSleep
+    clockOnSleep = true;
+  }
+  PushMessageToSystemTask(System::Messages::GoToSleep);
+}
+
 void DisplayApp::LoadScreen(Apps app, DisplayApp::FullRefreshDirections direction) {
+  // Whatever screen comes up now, a sleep that the side button asked for earlier is not about it
+  clockOnSleep = false;
   lvgl.CancelTap();
   lv_disp_trig_activity(nullptr);
   motorController.StopRinging();

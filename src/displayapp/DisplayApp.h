@@ -128,6 +128,7 @@ namespace Pinetime {
       void Refresh();
       void LoadNewScreen(Apps app, DisplayApp::FullRefreshDirections direction);
       void LoadScreen(Apps app, DisplayApp::FullRefreshDirections direction);
+      void PutAway();
       void PushMessageToSystemTask(Pinetime::System::Messages message);
 
       Apps nextApp = Apps::None;
@@ -141,6 +142,9 @@ namespace Pinetime {
 
       // The call screen is about to come up because the phone started ringing: it should buzz
       bool ringOnCallScreen = false;
+      // The side button asked for the sleep that is on its way: the watch comes back on the main
+      // screen, whichever screen the button was pressed on
+      bool clockOnSleep = false;
       // The buzz for the dot on the main screen: how many pieces of it are still to come, and when the last one began
       uint8_t markBuzzLeft = 0;
       TickType_t markBuzzTick = 0;
